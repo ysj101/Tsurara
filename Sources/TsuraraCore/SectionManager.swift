@@ -16,6 +16,8 @@ public final class SectionManager {
     /// 実機での適切な値の調整は #6 で行う。
     public static let hiddenSectionCollapsedLength: CGFloat = 10_000
 
+    private static let mainDividerAccessibilityDescription = "Tsurara 非表示セクションの切り替え"
+
     public let visibleSection: MenuBarSection
     public let hiddenSection: MenuBarSection
     public let alwaysHiddenSection: MenuBarSection
@@ -24,17 +26,36 @@ public final class SectionManager {
     /// （二重管理にすると自動再非表示などの経路で不整合が起きるため）。
     public var isHiddenSectionCollapsed: Bool { !hiddenSection.isVisible }
 
+    /// いずれかのメニューが開いている間 true。true の間に自動再非表示の時刻が来た場合は
+    /// 保留し、false へ戻ったときに再スケジュールする（メニュー検知はアプリ層の責務）。
+    public var isMenuTrackingActive = false {
+        didSet {
+            guard oldValue, !isMenuTrackingActive, isRehideDeferred else {
+                return
+            }
+            isRehideDeferred = false
+            scheduleRehideIfEnabled()
+        }
+    }
+
     // 展開時に復元する length。init 時点の値（AppKit では squareLength 番兵）を捕捉する。
     // 区切りの length を後から変える場合はこの値も更新すること。
     private let hiddenSectionExpandedLength: CGFloat
+    private let settings: SettingsStore
+    private let rehideTimer: any RehideTimerScheduling
+    private var isRehideScheduled = false
+    private var isRehideDeferred = false
 
     // サブ区切りの実行時の有効化/無効化（#9）で区切りを追加生成するために保持する。
     private let statusItemFactory: (String) -> any StatusItem
 
     public init(
         settings: SettingsStore,
+        rehideTimer: any RehideTimerScheduling = FoundationRehideTimerScheduler(),
         statusItemFactory: @escaping (String) -> any StatusItem
     ) {
+        self.settings = settings
+        self.rehideTimer = rehideTimer
         self.statusItemFactory = statusItemFactory
 
         // 生成順が並び順を決める: NSStatusItem は後から作られたものほど左に並ぶため、
@@ -43,7 +64,7 @@ public final class SectionManager {
         let mainDivider = statusItemFactory(Self.mainDividerIdentifier)
         mainDivider.setIcon(
             symbolName: Self.mainDividerExpandedSymbolName,
-            accessibilityDescription: "Tsurara 非表示セクションの切り替え"
+            accessibilityDescription: Self.mainDividerAccessibilityDescription
         )
         hiddenSectionExpandedLength = mainDivider.length
 
@@ -83,15 +104,56 @@ public final class SectionManager {
     }
 
     public func toggleHiddenSection() {
-        hiddenSection.isVisible.toggle()
-        hiddenSection.dividerItem?.length = isHiddenSectionCollapsed
+        if isHiddenSectionCollapsed {
+            setHiddenSectionCollapsed(false)
+            scheduleRehideIfEnabled()
+        } else {
+            cancelPendingRehide()
+            setHiddenSectionCollapsed(true)
+        }
+    }
+
+    private func scheduleRehideIfEnabled() {
+        guard settings.autoRehideEnabled, !isHiddenSectionCollapsed else {
+            return
+        }
+
+        isRehideScheduled = true
+        rehideTimer.schedule(after: TimeInterval(settings.autoRehideSeconds)) {
+            [weak self] in
+            self?.rehideTimerFired()
+        }
+    }
+
+    private func rehideTimerFired() {
+        isRehideScheduled = false
+        guard !isHiddenSectionCollapsed else { return }
+
+        if isMenuTrackingActive {
+            isRehideDeferred = true
+            return
+        }
+
+        setHiddenSectionCollapsed(true)
+    }
+
+    private func cancelPendingRehide() {
+        isRehideDeferred = false
+        guard isRehideScheduled else { return }
+        rehideTimer.cancel()
+        isRehideScheduled = false
+    }
+
+    private func setHiddenSectionCollapsed(_ collapsed: Bool) {
+        hiddenSection.isVisible = !collapsed
+        hiddenSection.dividerItem?.length = collapsed
             ? Self.hiddenSectionCollapsedLength
             : hiddenSectionExpandedLength
         hiddenSection.dividerItem?.setIcon(
-            symbolName: isHiddenSectionCollapsed
+            symbolName: collapsed
                 ? Self.mainDividerCollapsedSymbolName
                 : Self.mainDividerExpandedSymbolName,
-            accessibilityDescription: "Tsurara 非表示セクションの切り替え"
+            accessibilityDescription: Self.mainDividerAccessibilityDescription
         )
     }
 }
