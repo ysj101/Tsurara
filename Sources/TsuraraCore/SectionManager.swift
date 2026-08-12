@@ -193,6 +193,18 @@ public final class SectionManager {
 
     // MARK: - 自動再非表示
 
+    /// 設定画面などで autoRehideEnabled が変更された際に呼ぶ。
+    /// 展開中に有効化されたら直ちにスケジュールし、無効化されたら保留分も取り消す。
+    public func autoRehideSettingDidChange() {
+        if settings.autoRehideEnabled {
+            if !isHiddenSectionCollapsed, !isRehideScheduled {
+                scheduleRehideIfEnabled()
+            }
+        } else {
+            cancelPendingRehide()
+        }
+    }
+
     private func scheduleRehideIfEnabled() {
         guard settings.autoRehideEnabled, !isHiddenSectionCollapsed else {
             return

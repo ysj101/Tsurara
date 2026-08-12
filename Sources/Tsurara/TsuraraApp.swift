@@ -8,13 +8,16 @@ struct TsuraraApp: App {
 
     var body: some Scene {
         Settings {
-            EmptyView()
+            SettingsView(settings: appDelegate.settings)
         }
     }
 }
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    static private(set) weak var sharedSectionManager: SectionManager?
+
+    let settings = SettingsStore()
     private var sectionManager: SectionManager?
     private var menuTrackingObservers: [any NSObjectProtocol] = []
     private var openMenuCount = 0
@@ -25,11 +28,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 再現するために明示的に設定する。
         NSApp.setActivationPolicy(.accessory)
 
-        let settings = SettingsStore()
         let manager = SectionManager(
             settings: settings,
             statusItemFactory: { AppKitStatusItem(autosaveName: $0) }
         )
+        Self.sharedSectionManager = manager
         observeMenuTracking(for: manager)
         let hotkeyManager = HotkeyManager(
             settings: settings,
@@ -42,6 +45,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // LSUIElement アプリはメインメニューを持たず終了手段がないため、
         // 常に画面上に残るトグル項目の右クリック時だけ終了メニューを表示する。
         let menu = NSMenu()
+        // LSUIElement アプリはアプリメニュー（Cmd+,）を持たないため、
+        // 設定画面へはこのメニューが唯一の経路になる。
+        let settingsItem = NSMenuItem(
+            title: "設定…",
+            action: #selector(AppDelegate.openSettingsWindow),
+            keyEquivalent: ","
+        )
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+        menu.addItem(.separator())
         menu.addItem(
             withTitle: "Tsurara を終了",
             action: #selector(NSApplication.terminate(_:)),
@@ -88,6 +101,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 extension AppDelegate {
+    /// SwiftUI の Settings シーンを開く。accessory アプリはそのままだと
+    /// ウィンドウが最前面に出ないため、明示的にアクティブ化する。
+    @objc fileprivate func openSettingsWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+        // macOS 14+ の SwiftUI Settings シーンを開く標準セレクタ。
+        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+    }
+
     /// メニューの追跡状態を SectionManager へ伝える。
     /// NSMenu の通知は自プロセスのメニューにのみ届くため、他アプリのメニュー展開は
     /// 検知できない（MVP の既知の制約。spec の「いずれかのメニュー」への完全対応は
