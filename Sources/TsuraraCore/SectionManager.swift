@@ -1,3 +1,5 @@
+import Foundation
+
 @MainActor
 public final class SectionManager {
     /// メイン区切り（◇）のアイコン。非表示中は「つらら」を模した snowflake。
@@ -10,9 +12,16 @@ public final class SectionManager {
     public static let mainDividerIdentifier = "Tsurara.mainDivider"
     public static let subDividerIdentifier = "Tsurara.subDivider"
 
+    /// 非表示セクションを畳む際に、区切りの左側を画面外へ押し出す長さ。
+    /// 実機での適切な値の調整は #6 で行う。
+    public static let hiddenSectionCollapsedLength: CGFloat = 10_000
+
     public let visibleSection: MenuBarSection
     public let hiddenSection: MenuBarSection
     public let alwaysHiddenSection: MenuBarSection
+    public private(set) var isHiddenSectionCollapsed = false
+
+    private let hiddenSectionExpandedLength: CGFloat
 
     // サブ区切りの実行時の有効化/無効化（#9）で区切りを追加生成するために保持する。
     private let statusItemFactory: (String) -> any StatusItem
@@ -31,6 +40,7 @@ public final class SectionManager {
             symbolName: Self.mainDividerCollapsedSymbolName,
             accessibilityDescription: "Tsurara 非表示セクションの切り替え"
         )
+        hiddenSectionExpandedLength = mainDivider.length
 
         let secondaryDivider: (any StatusItem)?
         if settings.alwaysHiddenSectionEnabled {
@@ -45,8 +55,7 @@ public final class SectionManager {
         }
 
         // isVisible は「そのセクションのアイコンが画面上に見えているか」。
-        // length 拡大による collapse は #5（非表示）/#9（常時非表示）で導入されるため、
-        // この時点では全セクションが見えている状態で初期化する。
+        // length 拡大による collapse は toggleHiddenSection()（#5）/#9 で遷移する。
         visibleSection = MenuBarSection(
             kind: .visible,
             isVisible: true,
@@ -62,5 +71,13 @@ public final class SectionManager {
             isVisible: true,
             dividerItem: secondaryDivider
         )
+    }
+
+    public func toggleHiddenSection() {
+        isHiddenSectionCollapsed.toggle()
+        hiddenSection.isVisible = !isHiddenSectionCollapsed
+        hiddenSection.dividerItem?.length = isHiddenSectionCollapsed
+            ? Self.hiddenSectionCollapsedLength
+            : hiddenSectionExpandedLength
     }
 }
