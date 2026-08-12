@@ -147,12 +147,13 @@ struct SectionManagerToggleTests {
         ) { _ in
             dividers.removeFirst()
         }
+        let lengthHistoryAtLaunch = secondaryDivider.lengthHistory
 
         manager.toggleHiddenSection()
         manager.toggleHiddenSection()
 
-        #expect(secondaryDivider.length == StatusItemLength.variable)
-        #expect(secondaryDivider.lengthHistory.isEmpty)
-        #expect(manager.alwaysHiddenSection.isVisible)
+        #expect(secondaryDivider.length == SectionManager.hiddenSectionCollapsedLength)
+        #expect(secondaryDivider.lengthHistory == lengthHistoryAtLaunch)
+        #expect(manager.alwaysHiddenSection.isVisible == false)
     }
 }

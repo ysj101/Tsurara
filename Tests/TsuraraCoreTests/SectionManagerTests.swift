@@ -81,7 +81,7 @@ struct SectionManagerTests {
             #expect(manager.hiddenSection.dividerItem != nil)
 
             #expect(manager.alwaysHiddenSection.kind == .alwaysHidden)
-            #expect(manager.alwaysHiddenSection.isVisible)
+            #expect(manager.alwaysHiddenSection.isVisible == false)
             #expect(
                 (manager.alwaysHiddenSection.dividerItem != nil)
                     == alwaysHiddenSectionEnabled

@@ -12,11 +12,12 @@ public final class SectionManager {
     public static let mainDividerIdentifier = "Tsurara.mainDivider"
     public static let subDividerIdentifier = "Tsurara.subDivider"
 
-    /// 非表示セクションを畳む際に、区切りの左側を画面外へ押し出す長さ。
+    /// セクションを畳む際に、区切りの左側を画面外へ押し出す長さ。
     /// 実機での適切な値の調整は #6 で行う。
     public static let hiddenSectionCollapsedLength: CGFloat = 10_000
 
     private static let mainDividerAccessibilityDescription = "Tsurara 非表示セクションの切り替え"
+    private static let subDividerAccessibilityDescription = "Tsurara 常時非表示セクションの境界"
 
     public let visibleSection: MenuBarSection
     public let hiddenSection: MenuBarSection
@@ -41,12 +42,13 @@ public final class SectionManager {
     // 展開時に復元する length。init 時点の値（AppKit では squareLength 番兵）を捕捉する。
     // 区切りの length を後から変える場合はこの値も更新すること。
     private let hiddenSectionExpandedLength: CGFloat
+    private var alwaysHiddenSectionExpandedLength: CGFloat?
     private let settings: SettingsStore
     private let rehideTimer: any RehideTimerScheduling
     private var isRehideScheduled = false
     private var isRehideDeferred = false
 
-    // サブ区切りの実行時の有効化/無効化（#9）で区切りを追加生成するために保持する。
+    // サブ区切りの実行時の有効化/無効化で区切りを追加生成するために保持する。
     private let statusItemFactory: (String) -> any StatusItem
 
     public init(
@@ -73,15 +75,18 @@ public final class SectionManager {
             let item = statusItemFactory(Self.subDividerIdentifier)
             item.setIcon(
                 symbolName: Self.subDividerSymbolName,
-                accessibilityDescription: "Tsurara 常時非表示セクションの境界"
+                accessibilityDescription: Self.subDividerAccessibilityDescription
             )
+            // 常時非表示セクションは起動時から length 拡大で collapse しておく。
+            alwaysHiddenSectionExpandedLength = item.length
+            item.length = Self.hiddenSectionCollapsedLength
             secondaryDivider = item
         } else {
+            alwaysHiddenSectionExpandedLength = nil
             secondaryDivider = nil
         }
 
         // isVisible は「そのセクションのアイコンが画面上に見えているか」。
-        // length 拡大による collapse は toggleHiddenSection()（#5）/#9 で遷移する。
         visibleSection = MenuBarSection(
             kind: .visible,
             isVisible: true,
@@ -94,7 +99,7 @@ public final class SectionManager {
         )
         alwaysHiddenSection = MenuBarSection(
             kind: .alwaysHidden,
-            isVisible: true,
+            isVisible: false,
             dividerItem: secondaryDivider
         )
 
@@ -112,6 +117,53 @@ public final class SectionManager {
             setHiddenSectionCollapsed(true)
         }
     }
+
+    // MARK: - 常時非表示セクション
+
+    public func setAlwaysHiddenSectionEnabled(_ enabled: Bool) {
+        settings.alwaysHiddenSectionEnabled = enabled
+
+        if enabled {
+            if alwaysHiddenSection.dividerItem == nil {
+                let item = statusItemFactory(Self.subDividerIdentifier)
+                item.setIcon(
+                    symbolName: Self.subDividerSymbolName,
+                    accessibilityDescription: Self.subDividerAccessibilityDescription
+                )
+                alwaysHiddenSectionExpandedLength = item.length
+                alwaysHiddenSection.dividerItem = item
+            }
+            rehideAlwaysHiddenSection()
+        } else {
+            alwaysHiddenSection.dividerItem?.isVisible = false
+            alwaysHiddenSection.dividerItem = nil
+            alwaysHiddenSectionExpandedLength = nil
+            alwaysHiddenSection.isVisible = false
+        }
+    }
+
+    /// 設定画面の「常時非表示セクションを一時的に表示する」ボタン用（接続は #11）。
+    public func temporarilyShowAlwaysHiddenSection() {
+        guard
+            let dividerItem = alwaysHiddenSection.dividerItem,
+            let expandedLength = alwaysHiddenSectionExpandedLength
+        else { return }
+
+        dividerItem.length = expandedLength
+        alwaysHiddenSection.isVisible = true
+    }
+
+    public func rehideAlwaysHiddenSection() {
+        guard let dividerItem = alwaysHiddenSection.dividerItem else {
+            alwaysHiddenSection.isVisible = false
+            return
+        }
+
+        dividerItem.length = Self.hiddenSectionCollapsedLength
+        alwaysHiddenSection.isVisible = false
+    }
+
+    // MARK: - 自動再非表示
 
     private func scheduleRehideIfEnabled() {
         guard settings.autoRehideEnabled, !isHiddenSectionCollapsed else {
