@@ -18,17 +18,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var sectionManager: SectionManager?
     private var menuTrackingObservers: [any NSObjectProtocol] = []
     private var openMenuCount = 0
+    private var hotkeyManager: HotkeyManager?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // バンドルの LSUIElement と同じ状態を、バンドルを介さない `swift run` でも
         // 再現するために明示的に設定する。
         NSApp.setActivationPolicy(.accessory)
 
+        let settings = SettingsStore()
         let manager = SectionManager(
-            settings: SettingsStore(),
+            settings: settings,
             statusItemFactory: { AppKitStatusItem(autosaveName: $0) }
         )
         observeMenuTracking(for: manager)
+        let hotkeyManager = HotkeyManager(
+            settings: settings,
+            registrar: CarbonHotkeyRegistrar(),
+            onToggle: { manager.toggleHiddenSection() }
+        )
+        hotkeyManager.restoreFromSettings()
+        self.hotkeyManager = hotkeyManager
 
         // LSUIElement アプリはメインメニューを持たず終了手段がないため、
         // メイン区切りの右クリック時だけ終了メニューを表示する。
