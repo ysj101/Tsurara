@@ -3,30 +3,50 @@ import TsuraraCore
 
 struct SettingsView: View {
     @State private var viewModel: SettingsViewModel
+    private let loginItemSynchronizer: LoginItemSettingsSynchronizer
 
-    init(settings: SettingsStore = SettingsStore()) {
+    init(
+        settings: SettingsStore = SettingsStore(),
+        loginItemManager: any LoginItemManaging = SMAppServiceLoginItem()
+    ) {
         _viewModel = State(initialValue: SettingsViewModel(settings: settings))
+        loginItemSynchronizer = LoginItemSettingsSynchronizer(
+            settings: settings,
+            loginItemManager: loginItemManager
+        )
     }
 
     var body: some View {
         TabView {
-            GeneralSettingsView(viewModel: viewModel)
-                .tabItem {
-                    Label("一般", systemImage: "gearshape")
-                }
+            GeneralSettingsView(
+                viewModel: viewModel,
+                loginItemSynchronizer: loginItemSynchronizer
+            )
+            .tabItem {
+                Label("一般", systemImage: "gearshape")
+            }
             HotkeySettingsTab()
         }
-        .frame(width: 440, height: 260)
+        .frame(width: 440, height: 280)
     }
 }
 
 private struct GeneralSettingsView: View {
     @Bindable var viewModel: SettingsViewModel
+    let loginItemSynchronizer: LoginItemSettingsSynchronizer
+    @State private var loginItemErrorMessage: String?
 
     var body: some View {
         Form {
-            // SMAppService への実登録は #13 で接続する（現状は値の保存のみ）。
-            Toggle("ログイン時に起動", isOn: $viewModel.launchAtLogin)
+            Toggle(
+                "ログイン時に起動",
+                isOn: Binding(
+                    get: { viewModel.launchAtLogin },
+                    set: { enabled in
+                        updateLaunchAtLogin(enabled)
+                    }
+                )
+            )
 
             Toggle(
                 "常時非表示セクションを有効にする",
@@ -71,6 +91,33 @@ private struct GeneralSettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
-        .onAppear { viewModel.refresh() }
+        .onAppear {
+            viewModel.refresh()
+            // システム設定側で変更されている可能性があるため、実状態と同期する。
+            viewModel.launchAtLogin = loginItemSynchronizer.sync()
+        }
+        .alert(
+            "ログイン時起動を変更できませんでした",
+            isPresented: Binding(
+                get: { loginItemErrorMessage != nil },
+                set: { isPresented in
+                    if !isPresented { loginItemErrorMessage = nil }
+                }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(loginItemErrorMessage ?? "不明なエラーが発生しました。")
+        }
+    }
+
+    private func updateLaunchAtLogin(_ enabled: Bool) {
+        do {
+            viewModel.launchAtLogin = try loginItemSynchronizer.setEnabled(enabled)
+        } catch {
+            // Synchronizer は失敗時にも保存値を実状態へ戻す。表示も同じ値へ戻す。
+            viewModel.launchAtLogin = loginItemSynchronizer.sync()
+            loginItemErrorMessage = error.localizedDescription
+        }
     }
 }
