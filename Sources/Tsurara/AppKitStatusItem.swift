@@ -3,7 +3,11 @@ import TsuraraCore
 
 @MainActor
 final class AppKitStatusItem: NSObject, StatusItem {
-    private let statusItem: NSStatusItem
+    /// アプリ層がメニュー設定など NSStatusItem 固有の操作を行うための参照。
+    /// menu を設定すると onClick（target-action）は発火しなくなる点に注意。
+    let underlying: NSStatusItem
+
+    private var statusItem: NSStatusItem { underlying }
 
     var length: CGFloat {
         get { statusItem.length }
@@ -27,7 +31,7 @@ final class AppKitStatusItem: NSObject, StatusItem {
             withLength: NSStatusItem.squareLength
         )
     ) {
-        self.statusItem = statusItem
+        self.underlying = statusItem
         super.init()
     }
 

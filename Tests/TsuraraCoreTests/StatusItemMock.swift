@@ -2,15 +2,26 @@ import Foundation
 import TsuraraCore
 
 final class MockStatusItem: StatusItem {
+    struct Icon: Equatable {
+        let symbolName: String
+        let accessibilityDescription: String
+    }
+
     var length: CGFloat {
         didSet { lengthHistory.append(length) }
     }
 
-    var isVisible: Bool
+    var isVisible: Bool {
+        didSet { isVisibleHistory.append(isVisible) }
+    }
+
     var onClick: (() -> Void)?
 
     private(set) var lengthHistory: [CGFloat] = []
-    private(set) var iconSymbolNames: [String] = []
+    private(set) var isVisibleHistory: [Bool] = []
+    private(set) var icons: [Icon] = []
+
+    var iconSymbolNames: [String] { icons.map(\.symbolName) }
 
     init(length: CGFloat = 0, isVisible: Bool = true) {
         self.length = length
@@ -18,7 +29,7 @@ final class MockStatusItem: StatusItem {
     }
 
     func setIcon(symbolName: String, accessibilityDescription: String) {
-        iconSymbolNames.append(symbolName)
+        icons.append(Icon(symbolName: symbolName, accessibilityDescription: accessibilityDescription))
     }
 
     func fireClick() {

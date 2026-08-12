@@ -30,5 +30,19 @@ func iconSymbolNameIsRecorded() {
 
     statusItem.setIcon(symbolName: "snowflake", accessibilityDescription: "Tsurara")
 
-    #expect(statusItem.iconSymbolNames == ["snowflake"])
+    #expect(statusItem.icons == [
+        MockStatusItem.Icon(symbolName: "snowflake", accessibilityDescription: "Tsurara")
+    ])
+}
+
+@Test
+@MainActor
+func visibilityChangesAreRecorded() {
+    let statusItem = MockStatusItem(isVisible: true)
+
+    statusItem.isVisible = false
+    statusItem.isVisible = true
+
+    #expect(statusItem.isVisibleHistory == [false, true])
+    #expect(statusItem.isVisible)
 }
