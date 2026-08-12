@@ -16,6 +16,8 @@ struct TsuraraApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var sectionManager: SectionManager?
+    private var menuTrackingObservers: [any NSObjectProtocol] = []
+    private var openMenuCount = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // バンドルの LSUIElement と同じ状態を、バンドルを介さない `swift run` でも
@@ -26,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settings: SettingsStore(),
             statusItemFactory: { AppKitStatusItem(autosaveName: $0) }
         )
+        observeMenuTracking(for: manager)
 
         // LSUIElement アプリはメインメニューを持たず終了手段がないため、
         // メイン区切りの右クリック時だけ終了メニューを表示する。
@@ -56,5 +59,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
         }
         sectionManager = manager
+    }
+}
+
+extension AppDelegate {
+    /// メニューの追跡状態を SectionManager へ伝える。
+    /// NSMenu の通知は自プロセスのメニューにのみ届くため、他アプリのメニュー展開は
+    /// 検知できない（MVP の既知の制約。spec の「いずれかのメニュー」への完全対応は
+    /// 追加権限なしでは不可能なため、自アプリのメニューのみ対象とする）。
+    fileprivate func observeMenuTracking(for manager: SectionManager) {
+        let center = NotificationCenter.default
+        let begin = center.addObserver(
+            forName: NSMenu.didBeginTrackingNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.openMenuCount += 1
+                self.sectionManager?.isMenuTrackingActive = true
+            }
+        }
+        let end = center.addObserver(
+            forName: NSMenu.didEndTrackingNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.openMenuCount = max(0, self.openMenuCount - 1)
+                if self.openMenuCount == 0 {
+                    self.sectionManager?.isMenuTrackingActive = false
+                }
+            }
+        }
+        menuTrackingObservers = [begin, end]
     }
 }

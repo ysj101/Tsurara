@@ -132,4 +132,29 @@ struct AutoRehideTests {
         #expect(timer.cancelCount == 1)
         #expect(divider.lengthHistory == lengthHistoryAfterManualRehide)
     }
+
+    @Test
+    func disablingWhileTimerInFlightPreventsRehide() {
+        let defaults = UserDefaults(suiteName: autoRehideSuiteName)!
+        defaults.removePersistentDomain(forName: autoRehideSuiteName)
+        defer { defaults.removePersistentDomain(forName: autoRehideSuiteName) }
+
+        let settings = SettingsStore(defaults: defaults)
+        settings.autoRehideEnabled = true
+
+        let timer = ManualRehideTimer()
+        let manager = SectionManager(
+            settings: settings,
+            rehideTimer: timer
+        ) { _ in MockStatusItem(length: StatusItemLength.square) }
+
+        manager.toggleHiddenSection()  // collapse
+        manager.toggleHiddenSection()  // expand → schedule
+
+        // 発火前に設定を無効化したら、発火しても再非表示しない。
+        settings.autoRehideEnabled = false
+        timer.fire()
+
+        #expect(manager.isHiddenSectionCollapsed == false)
+    }
 }

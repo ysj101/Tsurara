@@ -22,17 +22,24 @@ public final class FoundationRehideTimerScheduler: RehideTimerScheduling {
         _ action: @escaping @MainActor () -> Void
     ) {
         cancel()
-        timer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) {
-            [weak self] _ in
+        let timer = Timer(timeInterval: seconds, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.timer = nil
                 action()
             }
         }
+        // .default モードだけだとメニュー追跡中（NSEventTrackingRunLoopMode）に
+        // タイマーが止まり、メニュー保留ロジックへ到達できないため .common に載せる。
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
     }
 
     public func cancel() {
         timer?.invalidate()
         timer = nil
+    }
+
+    isolated deinit {
+        timer?.invalidate()
     }
 }
