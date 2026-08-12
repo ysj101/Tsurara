@@ -9,8 +9,8 @@ public protocol RehideTimerScheduling: AnyObject {
     func cancel()
 }
 
-/// The main-run-loop timer used by the application. Keeping this implementation
-/// in TsuraraCore lets SectionManager remain independent of AppKit.
+/// アプリで使用するメイン RunLoop 上のタイマー。
+/// Foundation のみで実装し、TsuraraCore を AppKit から独立させる。
 @MainActor
 public final class FoundationRehideTimerScheduler: RehideTimerScheduling {
     private var timer: Timer?

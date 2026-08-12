@@ -129,6 +129,7 @@ struct AutoRehideTests {
         timer.fire()
 
         #expect(manager.isHiddenSectionCollapsed)
+        #expect(timer.cancelCount == 1)
         #expect(divider.lengthHistory == lengthHistoryAfterManualRehide)
     }
 }

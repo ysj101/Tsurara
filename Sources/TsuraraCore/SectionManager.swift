@@ -126,6 +126,8 @@ public final class SectionManager {
     }
 
     private func rehideTimerFired() {
+        // 単発タイマーは発火時点で消費済み。メニュー追跡中なら deferred に移し、
+        // 追跡終了時に改めて全秒数でスケジュールする。
         isRehideScheduled = false
         guard !isHiddenSectionCollapsed else { return }
 
