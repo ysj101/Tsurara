@@ -24,7 +24,7 @@ private func withSettings(
 @MainActor
 struct SectionManagerTests {
     @Test
-    func createsOnlyMainDividerByDefault() {
+    func createsToggleAndMainDividerByDefault() {
         withSettings { settings in
             var createdItems: [(identifier: String, item: MockStatusItem)] = []
 
@@ -34,12 +34,17 @@ struct SectionManagerTests {
                 return item
             }
 
-            #expect(createdItems.count == 1)
-            #expect(createdItems[0].identifier == SectionManager.mainDividerIdentifier)
-            #expect(manager.hiddenSection.dividerItem === createdItems[0].item)
+            #expect(createdItems.count == 2)
+            #expect(createdItems[0].identifier == SectionManager.toggleItemIdentifier)
+            #expect(createdItems[1].identifier == SectionManager.mainDividerIdentifier)
+            #expect(manager.toggleItem === createdItems[0].item)
+            #expect(manager.hiddenSection.dividerItem === createdItems[1].item)
             #expect(manager.alwaysHiddenSection.dividerItem == nil)
             #expect(createdItems[0].item.iconSymbolNames == [
-                SectionManager.mainDividerExpandedSymbolName
+                SectionManager.toggleExpandedSymbolName
+            ])
+            #expect(createdItems[1].item.iconSymbolNames == [
+                SectionManager.mainDividerSymbolName
             ])
         }
     }
@@ -55,13 +60,15 @@ struct SectionManagerTests {
                 return item
             }
 
-            #expect(createdItems.count == 2)
-            // 生成順 = 並び順の契約: メイン区切りが先、サブ区切りが後（より左）。
-            #expect(createdItems[0].identifier == SectionManager.mainDividerIdentifier)
-            #expect(createdItems[1].identifier == SectionManager.subDividerIdentifier)
-            #expect(manager.hiddenSection.dividerItem === createdItems[0].item)
-            #expect(manager.alwaysHiddenSection.dividerItem === createdItems[1].item)
-            #expect(createdItems[1].item.iconSymbolNames == [
+            #expect(createdItems.count == 3)
+            // 生成順 = 並び順の契約: トグル、メイン、サブ（より左）の順。
+            #expect(createdItems[0].identifier == SectionManager.toggleItemIdentifier)
+            #expect(createdItems[1].identifier == SectionManager.mainDividerIdentifier)
+            #expect(createdItems[2].identifier == SectionManager.subDividerIdentifier)
+            #expect(manager.toggleItem === createdItems[0].item)
+            #expect(manager.hiddenSection.dividerItem === createdItems[1].item)
+            #expect(manager.alwaysHiddenSection.dividerItem === createdItems[2].item)
+            #expect(createdItems[2].item.iconSymbolNames == [
                 SectionManager.subDividerSymbolName
             ])
         }

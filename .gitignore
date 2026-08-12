@@ -3,3 +3,7 @@
 build/
 .swiftpm/
 *.xcuserstate
+.build-test-verify/
+.tmp-bin/
+.codex-test-bin/
+.build-verify/

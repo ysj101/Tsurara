@@ -48,12 +48,14 @@ struct AutoRehideTests {
         settings.autoRehideSeconds = autoRehideSeconds
 
         let timer = ManualRehideTimer()
+        let toggleItem = MockStatusItem(length: StatusItemLength.square)
         let divider = MockStatusItem(length: StatusItemLength.square)
+        var items = [toggleItem, divider]
         let manager = SectionManager(
             settings: settings,
             rehideTimer: timer
         ) { _ in
-            divider
+            items.removeFirst()
         }
         return (manager, timer, divider)
     }

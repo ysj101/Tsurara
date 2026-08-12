@@ -40,23 +40,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.hotkeyManager = hotkeyManager
 
         // LSUIElement アプリはメインメニューを持たず終了手段がないため、
-        // メイン区切りの右クリック時だけ終了メニューを表示する。
+        // 常に画面上に残るトグル項目の右クリック時だけ終了メニューを表示する。
         let menu = NSMenu()
         menu.addItem(
             withTitle: "Tsurara を終了",
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         )
-        guard let mainDivider = manager.hiddenSection.dividerItem as? AppKitStatusItem else {
-            // 区切りが取れない状態は終了手段の喪失を意味するため、開発中に即気付けるようにする。
-            assertionFailure("メイン区切りが AppKitStatusItem ではない")
+        guard let toggleItem = manager.toggleItem as? AppKitStatusItem else {
+            // トグル項目が取れない状態は終了手段の喪失を意味するため、開発中に即気付けるようにする。
+            assertionFailure("トグル項目が AppKitStatusItem ではない")
             sectionManager = manager
             return
         }
-        mainDivider.onRightClick = { [weak mainDivider] in
+        toggleItem.onRightClick = { [weak toggleItem] in
             guard
-                let mainDivider,
-                let button = mainDivider.underlying.button
+                let toggleItem,
+                let button = toggleItem.underlying.button
             else { return }
 
             // menu プロパティへの一時代入 + performClick はボタンの target/action を
@@ -66,6 +66,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 at: NSPoint(x: 0, y: button.bounds.height + 4),
                 in: button
             )
+        }
+        // 保険: autosave 位置の復元や Cmd ドラッグでトグル項目が ◇ より左へ行くと
+        // collapse 時に画面外へ押し出され、終了手段を失う。セパレータ側にも同じ
+        // 終了メニューを付け、常にどちらかの右クリックで終了できるようにする。
+        if let mainDivider = manager.hiddenSection.dividerItem as? AppKitStatusItem {
+            mainDivider.onRightClick = { [weak mainDivider] in
+                guard
+                    let mainDivider,
+                    let button = mainDivider.underlying.button
+                else { return }
+                menu.popUp(
+                    positioning: nil,
+                    at: NSPoint(x: 0, y: button.bounds.height + 4),
+                    in: button
+                )
+            }
         }
         sectionManager = manager
     }

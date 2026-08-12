@@ -2,13 +2,17 @@ import Foundation
 
 @MainActor
 public final class SectionManager {
-    /// メイン区切り（◇）のアイコン。非表示中は「つらら」を模した snowflake。
-    public static let mainDividerCollapsedSymbolName = "snowflake"
-    public static let mainDividerExpandedSymbolName = "circle.dotted"
+    /// トグル項目の状態アイコン。非表示中は「つらら」を模した snowflake。
+    /// トグルアイテムの状態アイコン（非表示中は「つらら」を模した snowflake）。
+    public static let toggleCollapsedSymbolName = "snowflake"
+    public static let toggleExpandedSymbolName = "circle.dotted"
+    /// メイン区切り（伸びるセパレータ）の固定アイコン。
+    public static let mainDividerSymbolName = "poweron"
     public static let subDividerSymbolName = "diamond"
 
     /// NSStatusItem の autosaveName に使う識別子。位置の永続化キーを固定し、
     /// 再起動やサブ区切りの有効化/無効化で並びが入れ替わらないようにする。
+    public static let toggleItemIdentifier = "Tsurara.toggleItem"
     public static let mainDividerIdentifier = "Tsurara.mainDivider"
     public static let subDividerIdentifier = "Tsurara.subDivider"
 
@@ -16,12 +20,14 @@ public final class SectionManager {
     /// 実機での適切な値の調整は #6 で行う。
     public static let hiddenSectionCollapsedLength: CGFloat = 10_000
 
-    private static let mainDividerAccessibilityDescription = "Tsurara 非表示セクションの切り替え"
+    private static let toggleItemAccessibilityDescription = "Tsurara 非表示セクションの切り替え"
+    private static let mainDividerAccessibilityDescription = "Tsurara 非表示セクションの境界"
     private static let subDividerAccessibilityDescription = "Tsurara 常時非表示セクションの境界"
 
     public let visibleSection: MenuBarSection
     public let hiddenSection: MenuBarSection
     public let alwaysHiddenSection: MenuBarSection
+    public let toggleItem: any StatusItem
 
     /// 非表示セクションが畳まれているか。hiddenSection.isVisible を単一の情報源とする
     /// （二重管理にすると自動再非表示などの経路で不整合が起きるため）。
@@ -61,11 +67,19 @@ public final class SectionManager {
         self.statusItemFactory = statusItemFactory
 
         // 生成順が並び順を決める: NSStatusItem は後から作られたものほど左に並ぶため、
-        // メイン区切り（◇）→ サブ区切り（◆）の順に作ると
-        // [常時非表示] ◆ [非表示] ◇ [表示]（時計側）の配置になる。
+        // トグル → メイン区切り → サブ区切りの順に作ると
+        // [常時非表示] ◆ [非表示] | [トグル] [表示]（時計側）の配置になる。
+        // トグルは長さを変えないため、メイン区切りの拡大中も画面上に残る。
+        let toggleItem = statusItemFactory(Self.toggleItemIdentifier)
+        toggleItem.setIcon(
+            symbolName: Self.toggleExpandedSymbolName,
+            accessibilityDescription: Self.toggleItemAccessibilityDescription
+        )
+        self.toggleItem = toggleItem
+
         let mainDivider = statusItemFactory(Self.mainDividerIdentifier)
         mainDivider.setIcon(
-            symbolName: Self.mainDividerExpandedSymbolName,
+            symbolName: Self.mainDividerSymbolName,
             accessibilityDescription: Self.mainDividerAccessibilityDescription
         )
         hiddenSectionExpandedLength = mainDivider.length
@@ -99,7 +113,7 @@ public final class SectionManager {
             dividerItem: secondaryDivider
         )
 
-        mainDivider.onClick = { [weak self] in
+        toggleItem.onClick = { [weak self] in
             self?.toggleHiddenSection()
         }
     }
@@ -226,11 +240,11 @@ public final class SectionManager {
         hiddenSection.dividerItem?.length = collapsed
             ? Self.hiddenSectionCollapsedLength
             : hiddenSectionExpandedLength
-        hiddenSection.dividerItem?.setIcon(
+        toggleItem.setIcon(
             symbolName: collapsed
-                ? Self.mainDividerCollapsedSymbolName
-                : Self.mainDividerExpandedSymbolName,
-            accessibilityDescription: Self.mainDividerAccessibilityDescription
+                ? Self.toggleCollapsedSymbolName
+                : Self.toggleExpandedSymbolName,
+            accessibilityDescription: Self.toggleItemAccessibilityDescription
         )
     }
 }

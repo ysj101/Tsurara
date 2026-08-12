@@ -23,9 +23,10 @@ struct AlwaysHiddenSectionTests {
     @Test
     func enabledSectionStartsCollapsedAtLaunch() {
         withAlwaysHiddenSettings(enabled: true) { settings in
+            let toggleItem = MockStatusItem(length: StatusItemLength.square)
             let mainDivider = MockStatusItem(length: StatusItemLength.square)
             let subDivider = MockStatusItem(length: StatusItemLength.variable)
-            var dividers = [mainDivider, subDivider]
+            var dividers = [toggleItem, mainDivider, subDivider]
 
             let manager = SectionManager(settings: settings) { _ in
                 dividers.removeFirst()
@@ -40,9 +41,10 @@ struct AlwaysHiddenSectionTests {
     @Test
     func togglingHiddenSectionLeavesSubDividerCollapsed() {
         withAlwaysHiddenSettings(enabled: true) { settings in
+            let toggleItem = MockStatusItem(length: StatusItemLength.square)
             let mainDivider = MockStatusItem(length: StatusItemLength.square)
             let subDivider = MockStatusItem(length: StatusItemLength.variable)
-            var dividers = [mainDivider, subDivider]
+            var dividers = [toggleItem, mainDivider, subDivider]
             let manager = SectionManager(settings: settings) { _ in
                 dividers.removeFirst()
             }
@@ -59,11 +61,15 @@ struct AlwaysHiddenSectionTests {
     @Test
     func runtimeEnableAndDisableCreatesAndDisposesCollapsedDivider() {
         withAlwaysHiddenSettings(enabled: false) { settings in
+            let toggleItem = MockStatusItem(length: StatusItemLength.square)
             let mainDivider = MockStatusItem(length: StatusItemLength.square)
             let subDivider = MockStatusItem(length: StatusItemLength.variable)
             var createdIdentifiers: [String] = []
             let manager = SectionManager(settings: settings) { identifier in
                 createdIdentifiers.append(identifier)
+                if identifier == SectionManager.toggleItemIdentifier {
+                    return toggleItem
+                }
                 return identifier == SectionManager.mainDividerIdentifier
                     ? mainDivider
                     : subDivider
@@ -72,6 +78,7 @@ struct AlwaysHiddenSectionTests {
             manager.setAlwaysHiddenSectionEnabled(true)
 
             #expect(createdIdentifiers == [
+                SectionManager.toggleItemIdentifier,
                 SectionManager.mainDividerIdentifier,
                 SectionManager.subDividerIdentifier,
             ])
@@ -104,11 +111,11 @@ struct AlwaysHiddenSectionTests {
             manager.setAlwaysHiddenSectionEnabled(false)
             manager.setAlwaysHiddenSectionEnabled(true)
 
-            // main + サブ区切り 2 回で計 3 個。破棄済みの個体は再利用しない。
-            #expect(created.count == 3)
-            #expect(created[1].isRemoved)
+            // toggle + main + サブ区切り 2 回で計 4 個。破棄済みの個体は再利用しない。
+            #expect(created.count == 4)
+            #expect(created[2].isRemoved)
             let current = manager.alwaysHiddenSection.dividerItem as? MockStatusItem
-            #expect(current === created[2])
+            #expect(current === created[3])
             #expect(current?.isRemoved == false)
             #expect(current?.isVisible == true)
             #expect(current?.length == SectionManager.hiddenSectionCollapsedLength)
@@ -118,9 +125,10 @@ struct AlwaysHiddenSectionTests {
     @Test
     func collapsingHiddenSectionRehidesTemporarilyShownSection() {
         withAlwaysHiddenSettings(enabled: true) { settings in
+            let toggleItem = MockStatusItem(length: StatusItemLength.square)
             let mainDivider = MockStatusItem(length: StatusItemLength.square)
             let subDivider = MockStatusItem(length: 37)
-            var dividers = [mainDivider, subDivider]
+            var dividers = [toggleItem, mainDivider, subDivider]
             let manager = SectionManager(settings: settings) { _ in
                 dividers.removeFirst()
             }
@@ -140,9 +148,10 @@ struct AlwaysHiddenSectionTests {
     func temporarilyShowThenRehideTransitionsSection() {
         withAlwaysHiddenSettings(enabled: true) { settings in
             let originalLength: CGFloat = 37
+            let toggleItem = MockStatusItem(length: StatusItemLength.square)
             let mainDivider = MockStatusItem(length: StatusItemLength.square)
             let subDivider = MockStatusItem(length: originalLength)
-            var dividers = [mainDivider, subDivider]
+            var dividers = [toggleItem, mainDivider, subDivider]
             let manager = SectionManager(settings: settings) { _ in
                 dividers.removeFirst()
             }
