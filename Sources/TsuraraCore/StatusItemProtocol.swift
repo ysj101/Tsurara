@@ -15,5 +15,8 @@ public protocol StatusItem: AnyObject {
     /// （NSStatusItem は menu 設定時に target-action を送らない）。
     var onClick: (() -> Void)? { get set }
 
+    /// 副操作（右クリック / Control+左クリック）時に呼ばれる。
+    var onRightClick: (() -> Void)? { get set }
+
     func setIcon(symbolName: String, accessibilityDescription: String)
 }

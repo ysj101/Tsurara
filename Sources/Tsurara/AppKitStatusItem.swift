@@ -49,13 +49,17 @@ final class AppKitStatusItem: NSObject, StatusItem {
     }
 
     @objc private func handleClick() {
-        switch NSApp.currentEvent?.type {
-        case .rightMouseUp:
+        // 右クリックと Control+左クリック（macOS の副ボタン規約）を副操作として扱い、
+        // それ以外（キーボードや VoiceOver の press を含む）はすべて主操作に流す。
+        let event = NSApp.currentEvent
+        let isSecondaryClick =
+            event?.type == .rightMouseUp
+            || (event?.type == .leftMouseUp
+                && event?.modifierFlags.contains(.control) == true)
+        if isSecondaryClick {
             onRightClick?()
-        case .leftMouseUp, .none:
+        } else {
             onClick?()
-        default:
-            break
         }
     }
 

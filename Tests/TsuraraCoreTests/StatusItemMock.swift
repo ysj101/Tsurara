@@ -16,6 +16,7 @@ final class MockStatusItem: StatusItem {
     }
 
     var onClick: (() -> Void)?
+    var onRightClick: (() -> Void)?
 
     private(set) var lengthHistory: [CGFloat] = []
     private(set) var isVisibleHistory: [Bool] = []

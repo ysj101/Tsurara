@@ -47,9 +47,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let button = mainDivider.underlying.button
             else { return }
 
-            mainDivider.underlying.menu = menu
-            defer { mainDivider.underlying.menu = nil }
-            button.performClick(nil)
+            // menu プロパティへの一時代入 + performClick はボタンの target/action を
+            // AppKit に奪われる・再入するなど挙動が不定なため、popUp で直接表示する。
+            menu.popUp(
+                positioning: nil,
+                at: NSPoint(x: 0, y: button.bounds.height + 4),
+                in: button
+            )
         }
         sectionManager = manager
     }

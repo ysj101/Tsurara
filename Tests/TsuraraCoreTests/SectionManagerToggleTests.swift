@@ -33,7 +33,11 @@ struct SectionManagerToggleTests {
 
         #expect(manager.isHiddenSectionCollapsed)
         #expect(manager.hiddenSection.isVisible == false)
-        #expect(mainDivider.iconSymbolNames.last == SectionManager.mainDividerCollapsedSymbolName)
+        #expect(mainDivider.length == SectionManager.hiddenSectionCollapsedLength)
+        #expect(
+            mainDivider.iconSymbolNames.last
+                == SectionManager.mainDividerCollapsedSymbolName
+        )
     }
 
     @Test
