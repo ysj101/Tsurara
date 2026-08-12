@@ -2,16 +2,23 @@ import Foundation
 import Testing
 import TsuraraCore
 
+// UUID 入りの使い捨て suite は ~/Library/Preferences に plist を無限に残すため、
+// 固定名の suite を使い、前後で確実に掃除する。固定名を共有するため、
+// このファイルのテストは .serialized で直列実行する。
+private let testSuiteName = "TsuraraCoreTests.SettingsStore"
+
 private func withIsolatedDefaults(
     _ test: (UserDefaults) throws -> Void
 ) rethrows {
-    let suiteName = "TsuraraCoreTests.SettingsStore.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suiteName)!
-    defaults.removePersistentDomain(forName: suiteName)
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let defaults = UserDefaults(suiteName: testSuiteName)!
+    defaults.removePersistentDomain(forName: testSuiteName)
+    defer { defaults.removePersistentDomain(forName: testSuiteName) }
 
     try test(defaults)
 }
+
+@Suite(.serialized)
+struct SettingsStoreTests {
 
 @Test
 func settingsStoreUsesExpectedDefaults() {
@@ -21,7 +28,7 @@ func settingsStoreUsesExpectedDefaults() {
         #expect(store.launchAtLogin == false)
         #expect(store.alwaysHiddenSectionEnabled == false)
         #expect(store.autoRehideEnabled == true)
-        #expect(store.autoRehideSeconds == 15)
+        #expect(store.autoRehideSeconds == SettingsStore.defaultAutoRehideSeconds)
         #expect(store.toggleHotkey == nil)
     }
 }
@@ -63,7 +70,23 @@ func autoRehideSecondsIsClampedBeforePersistence(value: Int, expected: Int) {
         store.autoRehideSeconds = value
 
         #expect(store.autoRehideSeconds == expected)
-        #expect(defaults.integer(forKey: "autoRehideSeconds") == expected)
         #expect(SettingsStore(defaults: defaults).autoRehideSeconds == expected)
     }
+}
+
+@Test
+func autoRehideSecondsClampsExternallyStoredValues() {
+    withIsolatedDefaults { defaults in
+        let store = SettingsStore(defaults: defaults)
+
+        // defaults write 等でストアを介さずに書き込まれた値も範囲内に丸めて返す。
+        defaults.set(0, forKey: "com.ysj.Tsurara.autoRehideSeconds")
+        #expect(store.autoRehideSeconds == 5)
+
+        // 型不一致（文字列など）は既定値へフォールバックする。
+        defaults.set("fifteen", forKey: "com.ysj.Tsurara.autoRehideSeconds")
+        #expect(store.autoRehideSeconds == SettingsStore.defaultAutoRehideSeconds)
+    }
+}
+
 }
