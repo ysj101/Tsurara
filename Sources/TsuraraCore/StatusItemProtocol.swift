@@ -19,4 +19,8 @@ public protocol StatusItem: AnyObject {
     var onRightClick: (() -> Void)? { get set }
 
     func setIcon(symbolName: String, accessibilityDescription: String)
+
+    /// メニューバーから項目を取り除く。呼び出し後の再利用は不可。
+    /// （NSStatusItem は参照を手放すだけではステータスバーに残り続けるため必須）
+    func remove()
 }

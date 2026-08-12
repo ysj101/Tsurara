@@ -48,6 +48,10 @@ final class AppKitStatusItem: NSObject, StatusItem {
         )
     }
 
+    func remove() {
+        NSStatusBar.system.removeStatusItem(underlying)
+    }
+
     @objc private func handleClick() {
         // 右クリックと Control+左クリック（macOS の副ボタン規約）を副操作として扱い、
         // それ以外（キーボードや VoiceOver の press を含む）はすべて主操作に流す。

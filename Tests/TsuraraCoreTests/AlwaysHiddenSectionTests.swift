@@ -82,10 +82,57 @@ struct AlwaysHiddenSectionTests {
 
             manager.setAlwaysHiddenSectionEnabled(false)
 
-            #expect(subDivider.isVisible == false)
+            // 参照を手放すだけでなく、ステータスバーから確実に取り除く。
+            #expect(subDivider.isRemoved)
             #expect(manager.alwaysHiddenSection.dividerItem == nil)
             #expect(manager.alwaysHiddenSection.isVisible == false)
             #expect(settings.alwaysHiddenSectionEnabled == false)
+        }
+    }
+
+    @Test
+    func reenablingAfterDisableCreatesFreshDivider() {
+        withAlwaysHiddenSettings(enabled: false) { settings in
+            var created: [MockStatusItem] = []
+            let manager = SectionManager(settings: settings) { _ in
+                let item = MockStatusItem(length: StatusItemLength.variable)
+                created.append(item)
+                return item
+            }
+
+            manager.setAlwaysHiddenSectionEnabled(true)
+            manager.setAlwaysHiddenSectionEnabled(false)
+            manager.setAlwaysHiddenSectionEnabled(true)
+
+            // main + サブ区切り 2 回で計 3 個。破棄済みの個体は再利用しない。
+            #expect(created.count == 3)
+            #expect(created[1].isRemoved)
+            let current = manager.alwaysHiddenSection.dividerItem as? MockStatusItem
+            #expect(current === created[2])
+            #expect(current?.isRemoved == false)
+            #expect(current?.isVisible == true)
+            #expect(current?.length == SectionManager.hiddenSectionCollapsedLength)
+        }
+    }
+
+    @Test
+    func collapsingHiddenSectionRehidesTemporarilyShownSection() {
+        withAlwaysHiddenSettings(enabled: true) { settings in
+            let mainDivider = MockStatusItem(length: StatusItemLength.square)
+            let subDivider = MockStatusItem(length: 37)
+            var dividers = [mainDivider, subDivider]
+            let manager = SectionManager(settings: settings) { _ in
+                dividers.removeFirst()
+            }
+
+            manager.temporarilyShowAlwaysHiddenSection()
+            #expect(manager.alwaysHiddenSection.isVisible)
+
+            // 非表示セクションを畳むと、一時表示中の常時非表示セクションも畳まれる。
+            manager.toggleHiddenSection()
+
+            #expect(manager.alwaysHiddenSection.isVisible == false)
+            #expect(subDivider.length == SectionManager.hiddenSectionCollapsedLength)
         }
     }
 

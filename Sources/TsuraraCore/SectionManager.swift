@@ -72,13 +72,9 @@ public final class SectionManager {
 
         let secondaryDivider: (any StatusItem)?
         if settings.alwaysHiddenSectionEnabled {
-            let item = statusItemFactory(Self.subDividerIdentifier)
-            item.setIcon(
-                symbolName: Self.subDividerSymbolName,
-                accessibilityDescription: Self.subDividerAccessibilityDescription
-            )
-            // 常時非表示セクションは起動時から length 拡大で collapse しておく。
+            let item = Self.makeSubDivider(statusItemFactory)
             alwaysHiddenSectionExpandedLength = item.length
+            // 常時非表示セクションは起動時から length 拡大で collapse しておく。
             item.length = Self.hiddenSectionCollapsedLength
             secondaryDivider = item
         } else {
@@ -121,34 +117,52 @@ public final class SectionManager {
     // MARK: - 常時非表示セクション
 
     public func setAlwaysHiddenSectionEnabled(_ enabled: Bool) {
-        settings.alwaysHiddenSectionEnabled = enabled
-
         if enabled {
             if alwaysHiddenSection.dividerItem == nil {
-                let item = statusItemFactory(Self.subDividerIdentifier)
-                item.setIcon(
-                    symbolName: Self.subDividerSymbolName,
-                    accessibilityDescription: Self.subDividerAccessibilityDescription
-                )
+                // 注意: 実行時生成では autosaveName の保存位置が復元されるため、
+                // 「生成順 = 並び順」の契約は初回起動時のみ成立する。ユーザーが
+                // ◆ を ◇ より右へ動かした場合の並びは Cmd ドラッグでの再配置に委ねる。
+                let item = Self.makeSubDivider(statusItemFactory)
                 alwaysHiddenSectionExpandedLength = item.length
                 alwaysHiddenSection.dividerItem = item
             }
             rehideAlwaysHiddenSection()
         } else {
-            alwaysHiddenSection.dividerItem?.isVisible = false
+            // isVisible=false は autosaveName に永続化され次回生成時も不可視になる。
+            // 必ず remove() でステータスバーから取り除く（リークと永続化の両方を防ぐ）。
+            alwaysHiddenSection.dividerItem?.remove()
             alwaysHiddenSection.dividerItem = nil
             alwaysHiddenSectionExpandedLength = nil
             alwaysHiddenSection.isVisible = false
         }
+        // 生成・破棄が完了してから永続化し、途中失敗で設定と実態が食い違わないようにする。
+        settings.alwaysHiddenSectionEnabled = enabled
+    }
+
+    private static func makeSubDivider(
+        _ factory: (String) -> any StatusItem
+    ) -> any StatusItem {
+        let item = factory(Self.subDividerIdentifier)
+        item.setIcon(
+            symbolName: Self.subDividerSymbolName,
+            accessibilityDescription: Self.subDividerAccessibilityDescription
+        )
+        // 過去セッションで isVisible=false が autosave 経由で残っていても表示させる。
+        item.isVisible = true
+        return item
     }
 
     /// 設定画面の「常時非表示セクションを一時的に表示する」ボタン用（接続は #11）。
+    /// 非表示セクションが畳まれていると ◆ より左は表示できないため、併せて展開する。
     public func temporarilyShowAlwaysHiddenSection() {
         guard
             let dividerItem = alwaysHiddenSection.dividerItem,
             let expandedLength = alwaysHiddenSectionExpandedLength
         else { return }
 
+        if isHiddenSectionCollapsed {
+            setHiddenSectionCollapsed(false)
+        }
         dividerItem.length = expandedLength
         alwaysHiddenSection.isVisible = true
     }
@@ -203,6 +217,11 @@ public final class SectionManager {
     }
 
     private func setHiddenSectionCollapsed(_ collapsed: Bool) {
+        // 非表示セクションを畳むときは、一時表示中の常時非表示セクションも畳み直す
+        // （◆ より左だけが残る状態は存在しないため）。
+        if collapsed, alwaysHiddenSection.isVisible {
+            rehideAlwaysHiddenSection()
+        }
         hiddenSection.isVisible = !collapsed
         hiddenSection.dividerItem?.length = collapsed
             ? Self.hiddenSectionCollapsedLength

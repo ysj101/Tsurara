@@ -33,6 +33,12 @@ final class MockStatusItem: StatusItem {
         icons.append(Icon(symbolName: symbolName, accessibilityDescription: accessibilityDescription))
     }
 
+    private(set) var isRemoved = false
+
+    func remove() {
+        isRemoved = true
+    }
+
     func fireClick() {
         onClick?()
     }
