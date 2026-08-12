@@ -3,8 +3,8 @@ import Foundation
 @MainActor
 public final class SectionManager {
     /// メイン区切り（◇）のアイコン。非表示中は「つらら」を模した snowflake。
-    /// 表示中アイコンへの切り替えは #7 で実装する。
     public static let mainDividerCollapsedSymbolName = "snowflake"
+    public static let mainDividerExpandedSymbolName = "circle.dotted"
     public static let subDividerSymbolName = "diamond"
 
     /// NSStatusItem の autosaveName に使う識別子。位置の永続化キーを固定し、
@@ -42,7 +42,7 @@ public final class SectionManager {
         // [常時非表示] ◆ [非表示] ◇ [表示]（時計側）の配置になる。
         let mainDivider = statusItemFactory(Self.mainDividerIdentifier)
         mainDivider.setIcon(
-            symbolName: Self.mainDividerCollapsedSymbolName,
+            symbolName: Self.mainDividerExpandedSymbolName,
             accessibilityDescription: "Tsurara 非表示セクションの切り替え"
         )
         hiddenSectionExpandedLength = mainDivider.length
@@ -76,6 +76,10 @@ public final class SectionManager {
             isVisible: true,
             dividerItem: secondaryDivider
         )
+
+        mainDivider.onClick = { [weak self] in
+            self?.toggleHiddenSection()
+        }
     }
 
     public func toggleHiddenSection() {
@@ -83,5 +87,11 @@ public final class SectionManager {
         hiddenSection.dividerItem?.length = isHiddenSectionCollapsed
             ? Self.hiddenSectionCollapsedLength
             : hiddenSectionExpandedLength
+        hiddenSection.dividerItem?.setIcon(
+            symbolName: isHiddenSectionCollapsed
+                ? Self.mainDividerCollapsedSymbolName
+                : Self.mainDividerExpandedSymbolName,
+            accessibilityDescription: "Tsurara 非表示セクションの切り替え"
+        )
     }
 }

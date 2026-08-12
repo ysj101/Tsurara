@@ -28,9 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         // LSUIElement アプリはメインメニューを持たず終了手段がないため、
-        // 暫定でステータスアイテムのメニューから終了できるようにする。
-        // メニューを設定している間は onClick は発火しない（#7 でクリックトグルに
-        // 置き換える際に整理する）。
+        // メイン区切りの右クリック時だけ終了メニューを表示する。
         let menu = NSMenu()
         menu.addItem(
             withTitle: "Tsurara を終了",
@@ -43,7 +41,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             sectionManager = manager
             return
         }
-        mainDivider.underlying.menu = menu
+        mainDivider.onRightClick = { [weak mainDivider] in
+            guard
+                let mainDivider,
+                let button = mainDivider.underlying.button
+            else { return }
+
+            mainDivider.underlying.menu = menu
+            defer { mainDivider.underlying.menu = nil }
+            button.performClick(nil)
+        }
         sectionManager = manager
     }
 }

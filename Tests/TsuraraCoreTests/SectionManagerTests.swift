@@ -39,7 +39,7 @@ struct SectionManagerTests {
             #expect(manager.hiddenSection.dividerItem === createdItems[0].item)
             #expect(manager.alwaysHiddenSection.dividerItem == nil)
             #expect(createdItems[0].item.iconSymbolNames == [
-                SectionManager.mainDividerCollapsedSymbolName
+                SectionManager.mainDividerExpandedSymbolName
             ])
         }
     }

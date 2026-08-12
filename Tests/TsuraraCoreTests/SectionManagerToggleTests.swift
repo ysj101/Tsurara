@@ -19,6 +19,46 @@ private func makeToggleSettings(
 @MainActor
 struct SectionManagerToggleTests {
     @Test
+    func clickingMainDividerTogglesHiddenSectionAndIcon() {
+        let mainDivider = MockStatusItem(length: StatusItemLength.square)
+        let manager = SectionManager(settings: makeToggleSettings()) { _ in
+            mainDivider
+        }
+
+        #expect(mainDivider.iconSymbolNames == [
+            SectionManager.mainDividerExpandedSymbolName
+        ])
+
+        mainDivider.fireClick()
+
+        #expect(manager.isHiddenSectionCollapsed)
+        #expect(manager.hiddenSection.isVisible == false)
+        #expect(mainDivider.iconSymbolNames.last == SectionManager.mainDividerCollapsedSymbolName)
+    }
+
+    @Test
+    func repeatedMainDividerClicksAlternateIcons() {
+        let mainDivider = MockStatusItem(length: StatusItemLength.square)
+        let manager = SectionManager(settings: makeToggleSettings()) { _ in
+            mainDivider
+        }
+
+        mainDivider.fireClick()
+        mainDivider.fireClick()
+        mainDivider.fireClick()
+        mainDivider.fireClick()
+
+        #expect(manager.isHiddenSectionCollapsed == false)
+        #expect(mainDivider.iconSymbolNames == [
+            SectionManager.mainDividerExpandedSymbolName,
+            SectionManager.mainDividerCollapsedSymbolName,
+            SectionManager.mainDividerExpandedSymbolName,
+            SectionManager.mainDividerCollapsedSymbolName,
+            SectionManager.mainDividerExpandedSymbolName,
+        ])
+    }
+
+    @Test
     func visibleHiddenSectionCanBeCollapsed() {
         let mainDivider = MockStatusItem(length: StatusItemLength.square)
         let manager = SectionManager(settings: makeToggleSettings()) { _ in

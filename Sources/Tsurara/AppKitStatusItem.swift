@@ -4,7 +4,6 @@ import TsuraraCore
 @MainActor
 final class AppKitStatusItem: NSObject, StatusItem {
     /// アプリ層がメニュー設定など NSStatusItem 固有の操作を行うための参照。
-    /// menu を設定すると onClick（target-action）は発火しなくなる点に注意。
     let underlying: NSStatusItem
 
     private var statusItem: NSStatusItem { underlying }
@@ -20,10 +19,11 @@ final class AppKitStatusItem: NSObject, StatusItem {
     }
 
     var onClick: (() -> Void)? {
-        didSet {
-            statusItem.button?.target = onClick == nil ? nil : self
-            statusItem.button?.action = onClick == nil ? nil : #selector(handleClick)
-        }
+        didSet { updateClickHandling() }
+    }
+
+    var onRightClick: (() -> Void)? {
+        didSet { updateClickHandling() }
     }
 
     init(
@@ -38,6 +38,7 @@ final class AppKitStatusItem: NSObject, StatusItem {
         if let autosaveName {
             statusItem.autosaveName = autosaveName
         }
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
     }
 
     func setIcon(symbolName: String, accessibilityDescription: String) {
@@ -48,6 +49,19 @@ final class AppKitStatusItem: NSObject, StatusItem {
     }
 
     @objc private func handleClick() {
-        onClick?()
+        switch NSApp.currentEvent?.type {
+        case .rightMouseUp:
+            onRightClick?()
+        case .leftMouseUp, .none:
+            onClick?()
+        default:
+            break
+        }
+    }
+
+    private func updateClickHandling() {
+        let handlesClicks = onClick != nil || onRightClick != nil
+        statusItem.button?.target = handlesClicks ? self : nil
+        statusItem.button?.action = handlesClicks ? #selector(handleClick) : nil
     }
 }
