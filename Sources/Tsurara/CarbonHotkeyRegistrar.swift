@@ -11,9 +11,15 @@ final class CarbonHotkeyRegistrar: HotkeyRegistering {
 
     private var eventHandler: EventHandlerRef?
     private var registeredHotKey: EventHotKeyRef?
+    private var registeredConfiguration: HotkeyConfiguration?
     private var onPress: (@MainActor () -> Void)?
 
     init() {
+        installEventHandlerIfNeeded()
+    }
+
+    private func installEventHandlerIfNeeded() {
+        guard eventHandler == nil else { return }
         var eventType = EventTypeSpec(
             eventClass: OSType(kEventClassKeyboard),
             eventKind: UInt32(kEventHotKeyPressed)
@@ -28,6 +34,7 @@ final class CarbonHotkeyRegistrar: HotkeyRegistering {
             &eventHandler
         )
         if status != noErr {
+            NSLog("Tsurara: InstallEventHandler failed (OSStatus %d)", status)
             eventHandler = nil
         }
     }
@@ -45,23 +52,45 @@ final class CarbonHotkeyRegistrar: HotkeyRegistering {
         _ configuration: HotkeyConfiguration,
         onPress: @escaping @MainActor () -> Void
     ) -> Bool {
-        guard eventHandler != nil else { return false }
+        // 起動時にハンドラ設置へ失敗していても、次の登録時に再試行する。
+        installEventHandlerIfNeeded()
+        guard eventHandler != nil else {
+            NSLog("Tsurara: ホットキー登録不可（イベントハンドラ未設置）")
+            return false
+        }
+        guard let keyCode = HotkeyModifiers.validatedKeyCode(configuration.keyCode) else {
+            // 破損した保存値（負数など）で UInt32 変換がクラッシュしないよう検証する。
+            NSLog("Tsurara: 不正な keyCode %ld を無視", configuration.keyCode)
+            return false
+        }
+
+        // 同一キーの再登録は eventHotKeyExistsErr になるため、先に既存登録を解除する。
+        // 失敗時は旧登録を復元して「失敗しても現状維持」を守る。
+        let previous = registeredConfiguration
+        if let registeredHotKey {
+            UnregisterEventHotKey(registeredHotKey)
+            self.registeredHotKey = nil
+        }
 
         var newHotKey: EventHotKeyRef?
         let status = RegisterEventHotKey(
-            UInt32(configuration.keyCode),
-            Self.carbonModifiers(from: configuration.modifierFlags),
+            keyCode,
+            HotkeyModifiers.carbonModifiers(fromNSEventFlags: configuration.modifierFlags),
             Self.hotKeyID,
             GetApplicationEventTarget(),
             0,
             &newHotKey
         )
-        guard status == noErr, let newHotKey else { return false }
-
-        if let registeredHotKey {
-            UnregisterEventHotKey(registeredHotKey)
+        guard status == noErr, let newHotKey else {
+            NSLog("Tsurara: RegisterEventHotKey failed (OSStatus %d)", status)
+            if let previous, let previousOnPress = self.onPress {
+                _ = register(previous, onPress: previousOnPress)
+            }
+            return false
         }
+
         registeredHotKey = newHotKey
+        registeredConfiguration = configuration
         self.onPress = onPress
         return true
     }
@@ -71,6 +100,7 @@ final class CarbonHotkeyRegistrar: HotkeyRegistering {
             UnregisterEventHotKey(registeredHotKey)
         }
         registeredHotKey = nil
+        registeredConfiguration = nil
         onPress = nil
     }
 
@@ -105,20 +135,5 @@ final class CarbonHotkeyRegistrar: HotkeyRegistering {
             registrar.hotKeyPressed()
         }
         return noErr
-    }
-
-    private static func carbonModifiers(from rawValue: Int) -> UInt32 {
-        let modifiers = NSEvent.ModifierFlags(rawValue: UInt(rawValue))
-        var result: UInt32 = 0
-
-        if modifiers.contains(.command) { result |= UInt32(cmdKey) }
-        if modifiers.contains(.option) { result |= UInt32(optionKey) }
-        if modifiers.contains(.control) { result |= UInt32(controlKey) }
-        if modifiers.contains(.shift) { result |= UInt32(shiftKey) }
-        if modifiers.contains(.capsLock) { result |= UInt32(alphaLock) }
-        if modifiers.contains(.function) { result |= UInt32(kEventKeyModifierFnMask) }
-        if modifiers.contains(.numericPad) { result |= UInt32(kEventKeyModifierNumLockMask) }
-
-        return result
     }
 }

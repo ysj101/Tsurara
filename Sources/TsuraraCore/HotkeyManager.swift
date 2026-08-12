@@ -25,9 +25,12 @@ public final class HotkeyManager {
         self.onToggle = onToggle
     }
 
-    public func restoreFromSettings() {
-        guard let configuration = settings.toggleHotkey else { return }
-        _ = registrar.register(configuration, onPress: onToggle)
+    /// 保存済みホットキーを復元する。登録失敗（他アプリとの競合など）を
+    /// 呼び出し側が検知できるよう成否を返す。
+    @discardableResult
+    public func restoreFromSettings() -> Bool {
+        guard let configuration = settings.toggleHotkey else { return true }
+        return registrar.register(configuration, onPress: onToggle)
     }
 
     @discardableResult

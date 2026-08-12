@@ -155,3 +155,34 @@ struct HotkeyManagerTests {
         test(SettingsStore(defaults: defaults))
     }
 }
+
+@Suite
+struct HotkeyModifiersTests {
+    @Test
+    func convertsOnlyRegisterableModifiers() {
+        // cmd + option + fn + numericPad → fn/numericPad は無視される。
+        let flags = HotkeyModifiers.nsCommand | HotkeyModifiers.nsOption | (1 << 23) | (1 << 21)
+        #expect(
+            HotkeyModifiers.carbonModifiers(fromNSEventFlags: flags)
+                == (HotkeyModifiers.carbonCmd | HotkeyModifiers.carbonOption)
+        )
+    }
+
+    @Test
+    func convertsAllFourStandardModifiers() {
+        let flags = HotkeyModifiers.nsCommand | HotkeyModifiers.nsOption
+            | HotkeyModifiers.nsControl | HotkeyModifiers.nsShift
+        #expect(
+            HotkeyModifiers.carbonModifiers(fromNSEventFlags: flags)
+                == (HotkeyModifiers.carbonCmd | HotkeyModifiers.carbonOption
+                    | HotkeyModifiers.carbonControl | HotkeyModifiers.carbonShift)
+        )
+    }
+
+    @Test
+    func rejectsOutOfRangeKeyCodes() {
+        #expect(HotkeyModifiers.validatedKeyCode(-1) == nil)
+        #expect(HotkeyModifiers.validatedKeyCode(65_536) == nil)
+        #expect(HotkeyModifiers.validatedKeyCode(49) == 49)
+    }
+}
