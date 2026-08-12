@@ -13,7 +13,11 @@ cp "$BIN_DIR/Tsurara" "$APP_DIR/Contents/MacOS/Tsurara"
 cp "Resources/Info.plist" "$APP_DIR/Contents/Info.plist"
 
 # バージョンは TsuraraCore.version を単一の情報源とし、バンドルへ反映する。
-VERSION=$(sed -n 's/.*version = "\(.*\)".*/\1/p' Sources/TsuraraCore/TsuraraCore.swift)
+VERSION=$(sed -n 's/.*version[^=]*= *"\([^"]*\)".*/\1/p' Sources/TsuraraCore/TsuraraCore.swift)
+if [ -z "$VERSION" ]; then
+    echo "error: TsuraraCore.version を抽出できなかった" >&2
+    exit 1
+fi
 plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP_DIR/Contents/Info.plist"
 
 # SMAppService（ログイン時起動）はバンドル全体の署名を要求するため、

@@ -8,7 +8,7 @@ Tsurara is a macOS 14+ menu bar app for organizing menu bar items. This reposito
 Scripts/test.sh
 ```
 
-Xcode がある環境ではそのまま `swift test` に委譲する。Xcode のない環境（Command Line Tools のみ）では `swift test` がテストを 1 件も実行せず成功してしまうため、実行ターゲット `TsuraraTests` をビルドして直接実行する（判定は `xcode-select -p`）。
+Xcode がある環境ではそのまま `swift test` に委譲する。Xcode のない環境（Command Line Tools のみ）では `swift test` がテストを 1 件も実行せず成功してしまうため、実行ターゲット `TsuraraCoreTests` をビルドして直接実行する。環境判定は `DEVELOPER_DIR` 環境変数、なければ `xcode-select` の実体リンク（`/var/db/xcode_select_link`）の順で、`Package.swift` と `Scripts/test.sh` が同じ規則を使う。
 
 ## Build the app bundle
 
