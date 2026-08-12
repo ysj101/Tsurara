@@ -29,10 +29,15 @@ final class AppKitStatusItem: NSObject, StatusItem {
     init(
         statusItem: NSStatusItem = NSStatusBar.system.statusItem(
             withLength: NSStatusItem.squareLength
-        )
+        ),
+        autosaveName: String? = nil
     ) {
         self.underlying = statusItem
         super.init()
+        // 位置の永続化キーを固定し、再起動や項目数の変化で並びが崩れないようにする。
+        if let autosaveName {
+            statusItem.autosaveName = autosaveName
+        }
     }
 
     func setIcon(symbolName: String, accessibilityDescription: String) {

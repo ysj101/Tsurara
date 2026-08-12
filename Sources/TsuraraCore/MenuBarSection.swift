@@ -1,5 +1,5 @@
 /// メニューバーを区切る各領域の種別。
-public enum MenuBarSectionKind: CaseIterable, Sendable {
+public enum MenuBarSectionKind: Sendable {
     case visible
     case hidden
     case alwaysHidden

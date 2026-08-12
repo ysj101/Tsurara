@@ -24,7 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let manager = SectionManager(
             settings: SettingsStore(),
-            statusItemFactory: { AppKitStatusItem() }
+            statusItemFactory: { AppKitStatusItem(autosaveName: $0) }
         )
 
         // LSUIElement アプリはメインメニューを持たず終了手段がないため、
@@ -37,8 +37,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         )
-        let mainDivider = manager.hiddenSection.dividerItem as? AppKitStatusItem
-        mainDivider?.underlying.menu = menu
+        guard let mainDivider = manager.hiddenSection.dividerItem as? AppKitStatusItem else {
+            // 区切りが取れない状態は終了手段の喪失を意味するため、開発中に即気付けるようにする。
+            assertionFailure("メイン区切りが AppKitStatusItem ではない")
+            sectionManager = manager
+            return
+        }
+        mainDivider.underlying.menu = menu
         sectionManager = manager
     }
 }
