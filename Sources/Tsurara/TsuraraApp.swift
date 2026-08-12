@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         hotkeyManager.restoreFromSettings()
         self.hotkeyManager = hotkeyManager
+        HotkeyManager.shared = hotkeyManager
 
         // LSUIElement アプリはメインメニューを持たず終了手段がないため、
         // 常に画面上に残るトグル項目の右クリック時だけ終了メニューを表示する。

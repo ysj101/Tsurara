@@ -11,6 +11,13 @@ public protocol HotkeyRegistering {
 
 @MainActor
 public final class HotkeyManager {
+    /// The manager owned by the running app delegate. Kept weak so this access point
+    /// does not change the manager's lifetime (and remains harmless in unit tests).
+    /// UI から参照するプロセス唯一のインスタンス。AppDelegate が所有・代入する
+    /// （init での自動代入はテストや Preview の使い捨てインスタンスで上書き・
+    /// nil 化されるため行わない）。
+    public static weak var shared: HotkeyManager?
+
     private let settings: SettingsStore
     private let registrar: any HotkeyRegistering
     private let onToggle: @MainActor () -> Void
@@ -23,6 +30,10 @@ public final class HotkeyManager {
         self.settings = settings
         self.registrar = registrar
         self.onToggle = onToggle
+    }
+
+    public var currentConfiguration: HotkeyConfiguration? {
+        settings.toggleHotkey
     }
 
     /// 保存済みホットキーを復元する。登録失敗（他アプリとの競合など）を

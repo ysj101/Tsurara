@@ -14,8 +14,9 @@ struct SettingsView: View {
                 .tabItem {
                     Label("一般", systemImage: "gearshape")
                 }
+            HotkeySettingsTab()
         }
-        .frame(width: 440, height: 230)
+        .frame(width: 440, height: 260)
     }
 }
 
