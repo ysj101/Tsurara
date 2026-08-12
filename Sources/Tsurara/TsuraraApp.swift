@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import TsuraraCore
 
 @main
 struct TsuraraApp: App {
@@ -14,15 +15,17 @@ struct TsuraraApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var statusItem: AppKitStatusItem?
+    private var sectionManager: SectionManager?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // バンドルの LSUIElement と同じ状態を、バンドルを介さない `swift run` でも
         // 再現するために明示的に設定する。
         NSApp.setActivationPolicy(.accessory)
 
-        let item = AppKitStatusItem()
-        item.setIcon(symbolName: "snowflake", accessibilityDescription: "Tsurara")
+        let manager = SectionManager(
+            settings: SettingsStore(),
+            statusItemFactory: { AppKitStatusItem() }
+        )
 
         // LSUIElement アプリはメインメニューを持たず終了手段がないため、
         // 暫定でステータスアイテムのメニューから終了できるようにする。
@@ -34,7 +37,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         )
-        item.underlying.menu = menu
-        statusItem = item
+        let mainDivider = manager.hiddenSection.dividerItem as? AppKitStatusItem
+        mainDivider?.underlying.menu = menu
+        sectionManager = manager
     }
 }
