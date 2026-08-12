@@ -1,15 +1,15 @@
 #!/bin/sh
-# ユニットテストを実行する。
-# Xcode のない環境（CommandLineTools のみ）では `swift test` が swift-testing の
-# テストを発見できないため、実行ターゲット TsuraraTests をビルドして直接実行する。
-# Xcode がある環境では通常の `swift test` に委譲する（Package.swift と同じ判定）。
+# ユニットテストを実行する（背景は README の Test 節を参照）。
+# 判定は Package.swift と同一: DEVELOPER_DIR 環境変数 → xcode-select の実体リンクの順。
 set -eu
 cd "$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 
-case "$(xcode-select -p 2>/dev/null || true)" in
-*CommandLineTools*)
-    swift build --product TsuraraTests
-    exec .build/debug/TsuraraTests "$@"
+developer_dir="${DEVELOPER_DIR:-$(readlink /var/db/xcode_select_link 2>/dev/null || echo /Library/Developer/CommandLineTools)}"
+
+case "$developer_dir" in
+*CommandLineTools)
+    swift build --product TsuraraCoreTests
+    exec "$(swift build --show-bin-path)/TsuraraCoreTests" "$@"
     ;;
 *)
     exec swift test "$@"

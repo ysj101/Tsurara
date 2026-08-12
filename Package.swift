@@ -3,22 +3,21 @@
 import Foundation
 import PackageDescription
 
-// アクティブな developer directory を xcode-select のシンボリックリンクから判定する。
-// Xcode のない環境（CommandLineTools のみ）では `swift test` が swift-testing の
-// テストを発見できないため、CLT の Testing.framework を直接リンクした実行ターゲット
-// （`swift run TsuraraTests` / Scripts/test.sh）でテストを実行する。
-// Xcode がある環境では通常の testTarget を宣言し、`swift test` がそのまま使える。
+// Xcode の有無でテストターゲットの宣言を切り替える（背景は README の Test 節を参照）。
+// 判定は Scripts/test.sh と同一: DEVELOPER_DIR 環境変数 → xcode-select の実体リンクの順。
 let developerDir =
-    (try? FileManager.default.destinationOfSymbolicLink(atPath: "/var/db/xcode_select_link"))
+    ProcessInfo.processInfo.environment["DEVELOPER_DIR"]
+    ?? (try? FileManager.default.destinationOfSymbolicLink(atPath: "/var/db/xcode_select_link"))
     ?? "/Library/Developer/CommandLineTools"
 let isCommandLineToolsOnly = developerDir.hasSuffix("CommandLineTools")
 
-let cltFrameworksDir = "/Library/Developer/CommandLineTools/Library/Developer/Frameworks"
+let cltFrameworksDir = "\(developerDir)/Library/Developer/Frameworks"
+let cltTestingLibDir = "\(developerDir)/Library/Developer/usr/lib"
 
 let testTarget: Target =
     isCommandLineToolsOnly
     ? .executableTarget(
-        name: "TsuraraTests",
+        name: "TsuraraCoreTests",
         dependencies: ["TsuraraCore"],
         path: "Tests/TsuraraCoreTests",
         swiftSettings: [
@@ -31,7 +30,7 @@ let testTarget: Target =
                 "-Xlinker", "-rpath",
                 "-Xlinker", cltFrameworksDir,
                 "-Xlinker", "-rpath",
-                "-Xlinker", "/Library/Developer/CommandLineTools/Library/Developer/usr/lib",
+                "-Xlinker", cltTestingLibDir,
             ]),
         ]
     )

@@ -16,4 +16,4 @@ Xcode がある環境ではそのまま `swift test` に委譲する。Xcode の
 Scripts/make-app.sh
 ```
 
-The script creates `build/Tsurara.app`. Because this initial development bundle is unsigned, macOS may require you to approve it before launching it.
+The script creates `build/Tsurara.app` with an ad-hoc code signature (not notarized). macOS may require you to approve it before launching it.
