@@ -7,16 +7,17 @@ REPOSITORY_ROOT=$(dirname -- "$SCRIPT_DIR")
 
 cd "$REPOSITORY_ROOT"
 
-export CLANG_MODULE_CACHE_PATH="$REPOSITORY_ROOT/.build/clang-module-cache"
-export SWIFTPM_MODULECACHE_OVERRIDE="$REPOSITORY_ROOT/.build/swiftpm-module-cache"
-
-swift build -c release --product Tsurara --disable-sandbox
-BIN_DIR=$(swift build -c release --show-bin-path --disable-sandbox)
+swift build -c release --product Tsurara
+BIN_DIR="$REPOSITORY_ROOT/.build/release"
 APP_DIR="$REPOSITORY_ROOT/build/Tsurara.app"
 
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS"
 cp "$BIN_DIR/Tsurara" "$APP_DIR/Contents/MacOS/Tsurara"
 cp "$REPOSITORY_ROOT/Resources/Info.plist" "$APP_DIR/Contents/Info.plist"
+
+# SMAppService（ログイン時起動）はバンドル全体の署名を要求するため、
+# 手動ビルドでは ad-hoc 署名を付与する。
+codesign --force --sign - "$APP_DIR"
 
 echo "Created $APP_DIR"

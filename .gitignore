@@ -2,5 +2,4 @@
 .build/
 build/
 .swiftpm/
-Package.resolved
 *.xcuserstate

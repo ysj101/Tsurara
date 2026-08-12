@@ -1,5 +1,5 @@
 import Testing
-@testable import TsuraraCore
+import TsuraraCore
 
 @Test
 func versionIsInitialRelease() {

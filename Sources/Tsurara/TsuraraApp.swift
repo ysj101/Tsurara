@@ -24,6 +24,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             systemSymbolName: "snowflake",
             accessibilityDescription: "Tsurara"
         )
+
+        // LSUIElement アプリはメインメニューを持たず終了手段がないため、
+        // 暫定でステータスアイテムのメニューから終了できるようにする。
+        let menu = NSMenu()
+        menu.addItem(
+            withTitle: "Tsurara を終了",
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        )
+        item.menu = menu
         statusItem = item
     }
 }
