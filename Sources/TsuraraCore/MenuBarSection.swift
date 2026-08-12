@@ -9,7 +9,7 @@ public enum MenuBarSectionKind: Sendable {
 @MainActor
 public final class MenuBarSection {
     public let kind: MenuBarSectionKind
-    public var isVisible: Bool
+    public internal(set) var isVisible: Bool
     public let dividerItem: (any StatusItem)?
 
     public init(

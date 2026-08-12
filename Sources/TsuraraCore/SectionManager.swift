@@ -19,8 +19,13 @@ public final class SectionManager {
     public let visibleSection: MenuBarSection
     public let hiddenSection: MenuBarSection
     public let alwaysHiddenSection: MenuBarSection
-    public private(set) var isHiddenSectionCollapsed = false
 
+    /// 非表示セクションが畳まれているか。hiddenSection.isVisible を単一の情報源とする
+    /// （二重管理にすると自動再非表示などの経路で不整合が起きるため）。
+    public var isHiddenSectionCollapsed: Bool { !hiddenSection.isVisible }
+
+    // 展開時に復元する length。init 時点の値（AppKit では squareLength 番兵）を捕捉する。
+    // 区切りの length を後から変える場合はこの値も更新すること。
     private let hiddenSectionExpandedLength: CGFloat
 
     // サブ区切りの実行時の有効化/無効化（#9）で区切りを追加生成するために保持する。
@@ -74,8 +79,7 @@ public final class SectionManager {
     }
 
     public func toggleHiddenSection() {
-        isHiddenSectionCollapsed.toggle()
-        hiddenSection.isVisible = !isHiddenSectionCollapsed
+        hiddenSection.isVisible.toggle()
         hiddenSection.dividerItem?.length = isHiddenSectionCollapsed
             ? Self.hiddenSectionCollapsedLength
             : hiddenSectionExpandedLength

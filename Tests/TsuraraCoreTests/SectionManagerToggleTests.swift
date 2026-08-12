@@ -36,6 +36,8 @@ struct SectionManagerToggleTests {
             mainDivider.lengthHistory
                 == [SectionManager.hiddenSectionCollapsedLength]
         )
+        // 定数の同語反復にならない実質的な検証: 画面幅を超える拡大であること。
+        #expect(mainDivider.length > 1_000)
     }
 
     @Test
@@ -76,6 +78,18 @@ struct SectionManagerToggleTests {
         #expect(
             mainDivider.lengthHistory
                 == [SectionManager.hiddenSectionCollapsedLength, initialLength]
+        )
+
+        // 奇数回目でも正しく collapse する（復元値の取り違えを検出）。
+        manager.toggleHiddenSection()
+        #expect(manager.isHiddenSectionCollapsed)
+        #expect(
+            mainDivider.lengthHistory
+                == [
+                    SectionManager.hiddenSectionCollapsedLength,
+                    initialLength,
+                    SectionManager.hiddenSectionCollapsedLength,
+                ]
         )
     }
 
