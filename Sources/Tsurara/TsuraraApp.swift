@@ -7,8 +7,10 @@ struct TsuraraApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
+        // 設定ウィンドウは AppDelegate.openSettingsWindow が自前管理する
+        // （Settings シーンは accessory アプリでは開けないため使わない）。
         Settings {
-            SettingsView(settings: appDelegate.settings)
+            EmptyView()
         }
     }
 }
@@ -22,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuTrackingObservers: [any NSObjectProtocol] = []
     private var openMenuCount = 0
     private var hotkeyManager: HotkeyManager?
+    private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // バンドルの LSUIElement と同じ状態を、バンドルを介さない `swift run` でも
@@ -102,12 +105,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 extension AppDelegate {
-    /// SwiftUI の Settings シーンを開く。accessory アプリはそのままだと
-    /// ウィンドウが最前面に出ないため、明示的にアクティブ化する。
+    /// 設定ウィンドウを開く。SwiftUI の Settings シーンは LSUIElement/accessory
+    /// アプリだと showSettingsWindow: が処理されてもウィンドウが生成されない
+    /// （実測: handled=true かつウィンドウ一覧に現れない）ため、
+    /// NSHostingController で自前のウィンドウとして管理する。
     @objc fileprivate func openSettingsWindow() {
+        if settingsWindow == nil {
+            let hosting = NSHostingController(
+                rootView: SettingsView(settings: settings)
+            )
+            let window = NSWindow(contentViewController: hosting)
+            window.title = "Tsurara 設定"
+            window.styleMask = [.titled, .closable, .miniaturizable]
+            // 閉じてもインスタンスを保持し、次回は同じウィンドウを前面に出す。
+            window.isReleasedWhenClosed = false
+            window.center()
+            settingsWindow = window
+        }
         NSApp.activate(ignoringOtherApps: true)
-        // macOS 14+ の SwiftUI Settings シーンを開く標準セレクタ。
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
     /// メニューの追跡状態を SectionManager へ伝える。
