@@ -2,6 +2,17 @@
 
 Tsurara is a macOS 14+ menu bar app for organizing menu bar items. This repository uses Swift Package Manager and does not require an Xcode project.
 
+## Make targets
+
+```sh
+make test   # ユニットテスト（Scripts/test.sh）
+make build  # デバッグビルド
+make app    # build/Tsurara.app を生成（Scripts/make-app.sh）
+make run    # app を生成して起動
+make stop   # 起動中の Tsurara を終了
+make clean  # ビルド成果物を削除
+```
+
 ## Test
 
 ```sh
