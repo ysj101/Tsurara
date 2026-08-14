@@ -73,7 +73,7 @@ public struct ImagedMenuBarItem: @unchecked Sendable {
     }
 }
 
-public enum MenuBarItemImagingError: Error, Equatable {
+public enum MenuBarItemImagingError: Error, Equatable, LocalizedError {
     /// ScreenCaptureKit を呼ぶ前の preflight で権限がないことを検出した。
     case screenRecordingPermissionDenied
     /// 区切りが列挙結果にない場合、誤ったアプリを撮像しないよう処理を中止する。
@@ -82,6 +82,19 @@ public enum MenuBarItemImagingError: Error, Equatable {
     case captureWindowNotFound(windowID: CGWindowID)
     /// 同じ Imager に対する撮像要求がすでに進行中。
     case captureAlreadyInProgress
+
+    public var errorDescription: String? {
+        switch self {
+        case .screenRecordingPermissionDenied:
+            "画面収録の許可を確認できません。"
+        case let .dividerWindowNotFound(windowID):
+            "区切り項目（ウィンドウID: \(windowID)）が見つかりません。"
+        case let .captureWindowNotFound(windowID):
+            "撮像対象（ウィンドウID: \(windowID)）が見つかりません。"
+        case .captureAlreadyInProgress:
+            "別のメニューバー撮像が進行中です。"
+        }
+    }
 }
 
 public enum MenuBarItemWindowListingError: Error, Equatable {

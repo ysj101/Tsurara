@@ -97,7 +97,10 @@ public struct SubBarPanelLayoutCalculator: SubBarPanelLayoutCalculating {
 /// Core の状態制御から AppKit の NSPanel を分離する表示境界。
 @MainActor
 public protocol SubBarPanelPresenting: AnyObject {
-    func present(items: [ImagedMenuBarItem], anchorFrame: CGRect)
+    func present(
+        items: [ImagedMenuBarItem],
+        anchorFrame: @escaping @MainActor () -> CGRect?
+    ) -> Bool
     func dismiss()
 }
 
@@ -113,15 +116,30 @@ public enum SubBarPresentationState: Equatable, Sendable {
 /// `open(items:anchorFrame:)` を呼ぶ。撮像中の再トグルも確実に close へ戻せる。
 @MainActor
 public final class SubBarPresentationController {
+    public typealias Generation = UInt64
+
     public enum ToggleAction: Equatable, Sendable {
-        case beginOpening
+        case beginOpening(Generation)
         case close
     }
 
-    public private(set) var state: SubBarPresentationState = .closed
-    public var isOpen: Bool { state == .open }
+    private enum CycleState {
+        case closed
+        case opening(Generation)
+        case open(Generation)
+    }
+
+    public var state: SubBarPresentationState {
+        switch cycleState {
+        case .closed: .closed
+        case .opening: .opening
+        case .open: .open
+        }
+    }
 
     private let presenter: any SubBarPanelPresenting
+    private var cycleState: CycleState = .closed
+    private var nextGeneration: Generation = 0
 
     public init(presenter: any SubBarPanelPresenting) {
         self.presenter = presenter
@@ -129,27 +147,69 @@ public final class SubBarPresentationController {
 
     @discardableResult
     public func toggle() -> ToggleAction {
-        switch state {
+        switch cycleState {
         case .closed:
-            state = .opening
-            return .beginOpening
+            nextGeneration &+= 1
+            cycleState = .opening(nextGeneration)
+            return .beginOpening(nextGeneration)
         case .opening, .open:
             close()
             return .close
         }
     }
 
-    public func open(items: [ImagedMenuBarItem], anchorFrame: CGRect) {
-        guard state != .open else { return }
-        presenter.present(items: items, anchorFrame: anchorFrame)
-        state = .open
+    /// 指定世代が現在の opening サイクルを所有している場合だけ表示する。
+    @discardableResult
+    public func open(
+        items: [ImagedMenuBarItem],
+        generation: Generation,
+        anchorFrame: @escaping @MainActor () -> CGRect?
+    ) -> Bool {
+        guard case let .opening(currentGeneration) = cycleState,
+              currentGeneration == generation
+        else { return false }
+        guard presenter.present(items: items, anchorFrame: anchorFrame) else {
+            cycleState = .closed
+            return false
+        }
+        cycleState = .open(generation)
+        return true
     }
 
     public func close() {
-        guard state != .closed else { return }
-        if state == .open {
+        switch cycleState {
+        case .closed:
+            return
+        case .opening:
+            break
+        case .open:
             presenter.dismiss()
         }
-        state = .closed
+        cycleState = .closed
+    }
+
+    /// stale な非同期処理から現行サイクルを閉じないための世代付き close。
+    @discardableResult
+    public func close(generation: Generation) -> Bool {
+        guard ownsCycle(generation) else { return false }
+        if case .open = cycleState {
+            presenter.dismiss()
+        }
+        cycleState = .closed
+        return true
+    }
+
+    public func ownsCycle(_ generation: Generation) -> Bool {
+        switch cycleState {
+        case let .opening(currentGeneration), let .open(currentGeneration):
+            currentGeneration == generation
+        case .closed:
+            false
+        }
+    }
+
+    /// Task スロットの解放時に、より新しい世代を誤って消さないために使う。
+    public func isLatestGeneration(_ generation: Generation) -> Bool {
+        nextGeneration == generation
     }
 }

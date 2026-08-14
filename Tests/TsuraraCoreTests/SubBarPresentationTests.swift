@@ -7,10 +7,16 @@ private final class MockSubBarPanelPresenter: SubBarPanelPresenting {
     private(set) var presentedAnchors: [CGRect] = []
     private(set) var presentedItemCounts: [Int] = []
     private(set) var dismissCount = 0
+    var presentationSucceeds = true
 
-    func present(items: [ImagedMenuBarItem], anchorFrame: CGRect) {
+    func present(
+        items: [ImagedMenuBarItem],
+        anchorFrame: @escaping @MainActor () -> CGRect?
+    ) -> Bool {
+        guard presentationSucceeds, let anchorFrame = anchorFrame() else { return false }
         presentedAnchors.append(anchorFrame)
         presentedItemCounts.append(items.count)
+        return true
     }
 
     func dismiss() {
@@ -21,6 +27,16 @@ private final class MockSubBarPanelPresenter: SubBarPanelPresenting {
 @Suite
 @MainActor
 struct SubBarPresentationControllerTests {
+    private func beginOpening(
+        _ controller: SubBarPresentationController
+    ) -> SubBarPresentationController.Generation {
+        guard case let .beginOpening(generation) = controller.toggle() else {
+            Issue.record("closed 状態から opening を開始できませんでした")
+            return 0
+        }
+        return generation
+    }
+
     @Test
     func toggleBeginsOpeningAndOpenPresentsThroughProtocol() {
         let presenter = MockSubBarPanelPresenter()
@@ -28,14 +44,17 @@ struct SubBarPresentationControllerTests {
         let anchor = CGRect(x: 100, y: 800, width: 24, height: 24)
 
         #expect(controller.state == .closed)
-        #expect(controller.toggle() == .beginOpening)
+        let generation = beginOpening(controller)
         #expect(controller.state == .opening)
         #expect(presenter.presentedItemCounts.isEmpty)
 
-        controller.open(items: [], anchorFrame: anchor)
+        controller.open(
+            items: [],
+            generation: generation,
+            anchorFrame: { anchor }
+        )
 
         #expect(controller.state == .open)
-        #expect(controller.isOpen)
         #expect(presenter.presentedItemCounts == [0])
         #expect(presenter.presentedAnchors == [anchor])
     }
@@ -44,7 +63,8 @@ struct SubBarPresentationControllerTests {
     func togglingOpenPanelClosesItThroughProtocol() {
         let presenter = MockSubBarPanelPresenter()
         let controller = SubBarPresentationController(presenter: presenter)
-        controller.open(items: [], anchorFrame: .zero)
+        let generation = beginOpening(controller)
+        controller.open(items: [], generation: generation, anchorFrame: { .zero })
 
         #expect(controller.toggle() == .close)
 
@@ -57,7 +77,7 @@ struct SubBarPresentationControllerTests {
         let presenter = MockSubBarPanelPresenter()
         let controller = SubBarPresentationController(presenter: presenter)
 
-        #expect(controller.toggle() == .beginOpening)
+        _ = beginOpening(controller)
         #expect(controller.toggle() == .close)
 
         #expect(controller.state == .closed)
@@ -70,13 +90,86 @@ struct SubBarPresentationControllerTests {
         let presenter = MockSubBarPanelPresenter()
         let controller = SubBarPresentationController(presenter: presenter)
 
-        controller.open(items: [], anchorFrame: .zero)
-        controller.open(items: [], anchorFrame: .zero)
+        let generation = beginOpening(controller)
+        controller.open(items: [], generation: generation, anchorFrame: { .zero })
+        controller.open(items: [], generation: generation, anchorFrame: { .zero })
         controller.close()
         controller.close()
 
         #expect(presenter.presentedItemCounts == [0])
         #expect(presenter.dismissCount == 1)
+        #expect(controller.state == .closed)
+    }
+
+    @Test
+    func failedPresentationReturnsOpeningCycleToClosed() {
+        let presenter = MockSubBarPanelPresenter()
+        presenter.presentationSucceeds = false
+        let controller = SubBarPresentationController(presenter: presenter)
+        let generation = beginOpening(controller)
+
+        let didOpen = controller.open(
+            items: [],
+            generation: generation,
+            anchorFrame: { .zero }
+        )
+
+        #expect(!didOpen)
+        #expect(controller.state == .closed)
+        #expect(presenter.presentedItemCounts.isEmpty)
+    }
+
+    @Test
+    func staleGenerationCannotCloseOrPresentNewCycle() {
+        let presenter = MockSubBarPanelPresenter()
+        let controller = SubBarPresentationController(presenter: presenter)
+        let staleGeneration = beginOpening(controller)
+        controller.close()
+        let currentGeneration = beginOpening(controller)
+
+        #expect(!controller.close(generation: staleGeneration))
+        let staleDidOpen = controller.open(
+            items: [],
+            generation: staleGeneration,
+            anchorFrame: { .zero }
+        )
+        #expect(!staleDidOpen)
+        #expect(controller.state == .opening)
+        #expect(controller.ownsCycle(currentGeneration))
+    }
+
+    @Test
+    func staleGenerationCannotReleaseCurrentCaptureOwnership() {
+        let presenter = MockSubBarPanelPresenter()
+        let controller = SubBarPresentationController(presenter: presenter)
+        let staleGeneration = beginOpening(controller)
+        controller.close()
+        let currentGeneration = beginOpening(controller)
+
+        #expect(!controller.isLatestGeneration(staleGeneration))
+        #expect(controller.isLatestGeneration(currentGeneration))
+    }
+
+    @Test
+    func allOpeningExitPathsCanReturnStateToClosed() {
+        let presenter = MockSubBarPanelPresenter()
+        let controller = SubBarPresentationController(presenter: presenter)
+
+        let missingDividerGeneration = beginOpening(controller)
+        #expect(controller.close(generation: missingDividerGeneration))
+        #expect(controller.state == .closed)
+
+        let missingAnchorGeneration = beginOpening(controller)
+        let missingAnchorDidOpen = controller.open(
+            items: [],
+            generation: missingAnchorGeneration,
+            anchorFrame: { nil }
+        )
+        #expect(!missingAnchorDidOpen)
+        #expect(controller.state == .closed)
+
+        let errorGeneration = beginOpening(controller)
+        #expect(controller.close(generation: errorGeneration))
         #expect(controller.state == .closed)
     }
 }

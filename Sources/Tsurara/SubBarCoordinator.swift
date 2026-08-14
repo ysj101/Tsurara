@@ -27,14 +27,14 @@ final class SubBarCoordinator {
 
     func toggle() {
         switch presentationController.toggle() {
-        case .beginOpening:
+        case let .beginOpening(generation):
             var didPermitOpening = false
             permissionController.openSubBarIfPermitted { [weak self] in
                 didPermitOpening = true
-                self?.startCapture()
+                self?.startCapture(generation: generation)
             }
             if !didPermitOpening {
-                presentationController.close()
+                presentationController.close(generation: generation)
             }
         case .close:
             captureTask?.cancel()
@@ -48,17 +48,23 @@ final class SubBarCoordinator {
         presentationController.close()
     }
 
-    private func startCapture() {
+    private func startCapture(generation: SubBarPresentationController.Generation) {
         captureTask?.cancel()
         captureTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            defer { captureTask = nil }
+            // Task はキャンセル用ハンドルであり、進行状態は controller の世代付き
+            // state だけを正とする。古い Task が新しい Task の参照を消してはならない。
+            defer {
+                if presentationController.isLatestGeneration(generation) {
+                    captureTask = nil
+                }
+            }
             do {
                 guard
                     let mainDivider = manager.hiddenSection.dividerItem as? AppKitStatusItem,
                     let mainDividerWindowID = mainDivider.windowID
                 else {
-                    presentationController.close()
+                    presentationController.close(generation: generation)
                     return
                 }
                 let subDividerWindowID =
@@ -67,19 +73,23 @@ final class SubBarCoordinator {
                     mainDividerWindowID: mainDividerWindowID,
                     subDividerWindowID: subDividerWindowID
                 )
-                guard !Task.isCancelled,
-                      presentationController.state == .opening,
-                      let anchorFrame = toggleItem.screenFrame
-                else { return }
+                guard !Task.isCancelled else { return }
+                guard presentationController.ownsCycle(generation) else { return }
 
-                presentationController.open(items: items, anchorFrame: anchorFrame)
+                presentationController.open(
+                    items: items,
+                    generation: generation,
+                    anchorFrame: { [weak toggleItem] in toggleItem?.screenFrame }
+                )
             } catch is CancellationError {
-                presentationController.close()
+                guard !Task.isCancelled else { return }
+                presentationController.close(generation: generation)
             } catch {
-                presentationController.close()
-                if !Task.isCancelled {
-                    showCaptureFailure(error)
-                }
+                guard !Task.isCancelled,
+                      presentationController.ownsCycle(generation)
+                else { return }
+                presentationController.close(generation: generation)
+                showCaptureFailure(error)
             }
         }
     }
@@ -90,6 +100,7 @@ final class SubBarCoordinator {
         alert.messageText = "サブバーを表示できませんでした"
         alert.informativeText = "メニューバーアイコンの画像取得に失敗しました。\n\(error.localizedDescription)"
         alert.addButton(withTitle: "OK")
+        NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
     }
 }

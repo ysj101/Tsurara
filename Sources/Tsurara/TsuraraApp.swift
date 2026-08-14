@@ -102,11 +102,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        guard let mainDivider = manager.hiddenSection.dividerItem as? AppKitStatusItem else {
-            assertionFailure("メイン区切りが AppKitStatusItem ではない")
-            sectionManager = manager
-            return
-        }
         let panel = SubBarPanel()
         let presentationController = SubBarPresentationController(presenter: panel)
         let coordinator = SubBarCoordinator(
@@ -116,7 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 windowLister: CGWindowMenuBarItemWindowLister(),
                 imageCapturer: ScreenCaptureKitMenuBarItemImageCapturer(),
                 capturePositioner: AppKitMenuBarItemCapturePositioner(
-                    dividerItem: mainDivider
+                    sectionManager: manager
                 )
             ),
             permissionController: ScreenCapturePermissionOnboardingController(),

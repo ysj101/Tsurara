@@ -17,7 +17,7 @@ final class SubBarPanel: NSPanel, SubBarPanelPresenting {
     var onItemClick: ((ImagedMenuBarItem) -> Void)?
 
     private let layoutCalculator: any SubBarPanelLayoutCalculating
-    private var anchorFrame = CGRect.zero
+    private var anchorFrameProvider: (@MainActor () -> CGRect?)?
     // AppKit の monitor token は Sendable ではない。登録・解除は MainActor 上だけで
     // 行い、nonisolated deinit から最終解除するため token の格納だけ unsafe とする。
     nonisolated(unsafe) private var localClickMonitor: Any?
@@ -40,19 +40,21 @@ final class SubBarPanel: NSPanel, SubBarPanelPresenting {
         hasShadow = true
         hidesOnDeactivate = false
         isFloatingPanel = true
+        isReleasedWhenClosed = false
         becomesKeyOnlyIfNeeded = true
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
     }
 
-    func present(items: [ImagedMenuBarItem], anchorFrame: CGRect) {
-        let orderedItems = items.sorted {
-            if $0.order == $1.order { return $0.windowID < $1.windowID }
-            return $0.order < $1.order
-        }
-        let itemWidth = orderedItems.reduce(CGFloat.zero) {
+    func present(
+        items: [ImagedMenuBarItem],
+        anchorFrame: @escaping @MainActor () -> CGRect?
+    ) -> Bool {
+        guard let currentAnchorFrame = anchorFrame() else { return false }
+        // MenuBarItemImager が order 順に生成するため、ここでの再ソートは不要。
+        let itemWidth = items.reduce(CGFloat.zero) {
             $0 + max(1, $1.frame.width)
         }
-        let itemHeight = orderedItems.map { max(1, $0.frame.height) }.max()
+        let itemHeight = items.map { max(1, $0.frame.height) }.max()
             ?? Metrics.emptyHeight
         let desiredSize = CGSize(
             width: max(Metrics.emptyWidth, itemWidth) + Metrics.horizontalPadding * 2,
@@ -62,25 +64,27 @@ final class SubBarPanel: NSPanel, SubBarPanelPresenting {
             SubBarScreenGeometry(frame: $0.frame, visibleFrame: $0.visibleFrame)
         }
         guard let panelFrame = layoutCalculator.panelFrame(
-            anchorFrame: anchorFrame,
+            anchorFrame: currentAnchorFrame,
             desiredSize: desiredSize,
             screens: screens
-        ) else { return }
+        ) else { return false }
 
-        self.anchorFrame = anchorFrame
+        anchorFrameProvider = anchorFrame
         setFrame(panelFrame, display: false)
         contentView = makeContentView(
-            items: orderedItems,
+            items: items,
             contentWidth: itemWidth,
             itemHeight: itemHeight,
             panelSize: panelFrame.size
         )
         installOutsideClickMonitors()
         orderFrontRegardless()
+        return true
     }
 
     func dismiss() {
         removeOutsideClickMonitors()
+        anchorFrameProvider = nil
         orderOut(nil)
     }
 
@@ -145,23 +149,35 @@ final class SubBarPanel: NSPanel, SubBarPanelPresenting {
         localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: eventMask) {
             [weak self] event in
             MainActor.assumeIsolated {
-                self?.dismissIfClickIsOutside()
+                self?.dismissIfClickIsOutside(event)
             }
             return event
         }
         globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: eventMask) {
-            [weak self] _ in
-            Task { @MainActor in
-                self?.dismissIfClickIsOutside()
+            [weak self] event in
+            MainActor.assumeIsolated {
+                self?.dismissIfClickIsOutside(event)
             }
         }
     }
 
-    private func dismissIfClickIsOutside() {
-        let location = NSEvent.mouseLocation
+    private func dismissIfClickIsOutside(_ event: NSEvent) {
+        let location: CGPoint
+        if let eventWindow = event.window {
+            location = eventWindow.convertToScreen(
+                CGRect(origin: event.locationInWindow, size: .zero)
+            ).origin
+        } else {
+            // グローバルモニタの window=nil イベントは locationInWindow 自体が
+            // AppKit の screen 座標。イベント発生時の座標を同期的に使用する。
+            location = event.locationInWindow
+        }
+        let currentAnchorFrame = anchorFrameProvider?()
         // アンカー上のクリックは StatusItem の action に任せる。先に外側クリックとして
         // close すると、同じイベントの toggle が再び open してしまうため。
-        guard !frame.contains(location), !anchorFrame.contains(location) else { return }
+        guard !frame.contains(location),
+              currentAnchorFrame?.contains(location) != true
+        else { return }
         onDismissRequest?()
     }
 
