@@ -22,15 +22,15 @@ struct SettingsViewModelTests {
             let store = SettingsStore(defaults: defaults)
             store.launchAtLogin = true
             store.alwaysHiddenSectionEnabled = true
-            store.autoRehideEnabled = false
-            store.autoRehideSeconds = 25
+            store.autoCloseEnabled = false
+            store.autoCloseSeconds = 25
 
             let viewModel = SettingsViewModel(settings: store)
 
             #expect(viewModel.launchAtLogin)
             #expect(viewModel.alwaysHiddenSectionEnabled)
-            #expect(!viewModel.autoRehideEnabled)
-            #expect(viewModel.autoRehideSeconds == 25)
+            #expect(!viewModel.autoCloseEnabled)
+            #expect(viewModel.autoCloseSeconds == 25)
         }
     }
 
@@ -42,14 +42,14 @@ struct SettingsViewModelTests {
 
             viewModel.launchAtLogin = true
             viewModel.alwaysHiddenSectionEnabled = true
-            viewModel.autoRehideEnabled = false
-            viewModel.autoRehideSeconds = 30
+            viewModel.autoCloseEnabled = false
+            viewModel.autoCloseSeconds = 30
 
             let reloadedStore = SettingsStore(defaults: defaults)
             #expect(reloadedStore.launchAtLogin)
             #expect(reloadedStore.alwaysHiddenSectionEnabled)
-            #expect(!reloadedStore.autoRehideEnabled)
-            #expect(reloadedStore.autoRehideSeconds == 30)
+            #expect(!reloadedStore.autoCloseEnabled)
+            #expect(reloadedStore.autoCloseSeconds == 30)
         }
     }
 
@@ -59,14 +59,14 @@ struct SettingsViewModelTests {
             let store = SettingsStore(defaults: defaults)
             let viewModel = SettingsViewModel(settings: store)
 
-            viewModel.autoRehideSeconds = value
+            viewModel.autoCloseSeconds = value
 
             let expected = min(
-                max(value, SettingsStore.autoRehideSecondsRange.lowerBound),
-                SettingsStore.autoRehideSecondsRange.upperBound
+                max(value, SettingsStore.autoCloseSecondsRange.lowerBound),
+                SettingsStore.autoCloseSecondsRange.upperBound
             )
-            #expect(viewModel.autoRehideSeconds == expected)
-            #expect(store.autoRehideSeconds == expected)
+            #expect(viewModel.autoCloseSeconds == expected)
+            #expect(store.autoCloseSeconds == expected)
         }
     }
 }

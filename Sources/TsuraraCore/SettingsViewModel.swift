@@ -5,8 +5,8 @@ public final class SettingsViewModel: Observable {
     private let registrar = ObservationRegistrar()
     private var storedLaunchAtLogin: Bool
     private var storedAlwaysHiddenSectionEnabled: Bool
-    private var storedAutoRehideEnabled: Bool
-    private var storedAutoRehideSeconds: Int
+    private var storedAutoCloseEnabled: Bool
+    private var storedAutoCloseSeconds: Int
 
     // NOTE: 値の保存のみ。SMAppService への実登録は #13 で接続する。
     public var launchAtLogin: Bool {
@@ -35,29 +35,29 @@ public final class SettingsViewModel: Observable {
         }
     }
 
-    public var autoRehideEnabled: Bool {
+    public var autoCloseEnabled: Bool {
         get {
-            registrar.access(self, keyPath: \.autoRehideEnabled)
-            return storedAutoRehideEnabled
+            registrar.access(self, keyPath: \.autoCloseEnabled)
+            return storedAutoCloseEnabled
         }
         set {
-            registrar.withMutation(of: self, keyPath: \.autoRehideEnabled) {
-                storedAutoRehideEnabled = newValue
-                settings.autoRehideEnabled = newValue
+            registrar.withMutation(of: self, keyPath: \.autoCloseEnabled) {
+                storedAutoCloseEnabled = newValue
+                settings.autoCloseEnabled = newValue
             }
         }
     }
 
-    public var autoRehideSeconds: Int {
+    public var autoCloseSeconds: Int {
         get {
-            registrar.access(self, keyPath: \.autoRehideSeconds)
-            return storedAutoRehideSeconds
+            registrar.access(self, keyPath: \.autoCloseSeconds)
+            return storedAutoCloseSeconds
         }
         set {
-            registrar.withMutation(of: self, keyPath: \.autoRehideSeconds) {
-                settings.autoRehideSeconds = newValue
+            registrar.withMutation(of: self, keyPath: \.autoCloseSeconds) {
+                settings.autoCloseSeconds = newValue
                 // SettingsStore remains the source of truth for range enforcement.
-                storedAutoRehideSeconds = settings.autoRehideSeconds
+                storedAutoCloseSeconds = settings.autoCloseSeconds
             }
         }
     }
@@ -66,8 +66,8 @@ public final class SettingsViewModel: Observable {
         self.settings = settings
         storedLaunchAtLogin = settings.launchAtLogin
         storedAlwaysHiddenSectionEnabled = settings.alwaysHiddenSectionEnabled
-        storedAutoRehideEnabled = settings.autoRehideEnabled
-        storedAutoRehideSeconds = settings.autoRehideSeconds
+        storedAutoCloseEnabled = settings.autoCloseEnabled
+        storedAutoCloseSeconds = settings.autoCloseSeconds
     }
 
     /// ストアの現在値を再読込する。ウィンドウ再表示時や、SectionManager など
@@ -79,11 +79,11 @@ public final class SettingsViewModel: Observable {
         registrar.withMutation(of: self, keyPath: \.alwaysHiddenSectionEnabled) {
             storedAlwaysHiddenSectionEnabled = settings.alwaysHiddenSectionEnabled
         }
-        registrar.withMutation(of: self, keyPath: \.autoRehideEnabled) {
-            storedAutoRehideEnabled = settings.autoRehideEnabled
+        registrar.withMutation(of: self, keyPath: \.autoCloseEnabled) {
+            storedAutoCloseEnabled = settings.autoCloseEnabled
         }
-        registrar.withMutation(of: self, keyPath: \.autoRehideSeconds) {
-            storedAutoRehideSeconds = settings.autoRehideSeconds
+        registrar.withMutation(of: self, keyPath: \.autoCloseSeconds) {
+            storedAutoCloseSeconds = settings.autoCloseSeconds
         }
     }
 }

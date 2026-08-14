@@ -96,12 +96,12 @@ final class SubBarCoordinator {
         // 実アイテムのメニューとパネルが重ならないよう、許可済みの場合だけ閉じる。
         // 権限がない経路ではサブバーを表示したままにし、クリック転送だけを無効化する。
         closeSubBar()
-        manager.isMenuTrackingActive = true
-        forwardingTask = Task { @MainActor [weak self] in
+        manager.beginAutoClosePause(source: .clickForwarding)
+        forwardingTask = Task { @MainActor [weak self, manager] in
+            defer { manager.endAutoClosePause(source: .clickForwarding) }
             guard let self else { return }
             defer {
                 forwardingTask = nil
-                manager.isMenuTrackingActive = false
             }
             do {
                 try await clickForwarder.forwardClick(on: item, button: button)

@@ -2,6 +2,11 @@ import Foundation
 
 @MainActor
 public final class SectionManager {
+    public enum AutoClosePauseSource: Hashable, Sendable {
+        case menuTracking
+        case clickForwarding
+    }
+
     /// トグル項目の状態アイコン。閉時は「つらら」を模した snowflake。
     public static let toggleClosedSymbolName = "snowflake"
     public static let toggleOpenSymbolName = "circle.dotted"
@@ -36,18 +41,13 @@ public final class SectionManager {
     /// 実際にサブバーが表示されているか。撮像中はまだ false のままとする。
     public private(set) var isSubBarOpen = false
 
-    /// いずれかのメニュー／ポップオーバーが開いている間 true。
-    /// true になった時点で自動クローズを一時停止し、false で残り時間から再開する。
-    /// メニュー検知はアプリ層の責務とする。
-    public var isMenuTrackingActive = false {
-        didSet {
-            guard oldValue != isMenuTrackingActive, isSubBarOpen else { return }
-            if isMenuTrackingActive {
-                pausePendingRehide()
-            } else {
-                resumePendingRehide()
-            }
-        }
+    /// メニュー通知とクリック転送を同じカウンタで合成する。
+    /// 各発生源は begin/end を必ず対にし、通知欠落からの復旧時は reset を使う。
+    public private(set) var autoClosePauseCount = 0
+    private var autoClosePauseCountsBySource: [AutoClosePauseSource: Int] = [:]
+
+    public var isAutoClosePaused: Bool {
+        autoClosePauseCount > 0
     }
 
     // 常時非表示セクションの一時表示時だけ復元する length。
@@ -56,13 +56,16 @@ public final class SectionManager {
     private var alwaysHiddenSectionExpandedLength: CGFloat?
     private let settings: SettingsStore
     private let rehideTimer: any RehideTimerScheduling
-    private let currentTime: @MainActor () -> TimeInterval
-    private var isRehideScheduled = false
-    private var isRehideDeferred = false
+    private enum AutoCloseState {
+        case idle
+        case scheduled(deadline: TimeInterval, generation: UInt)
+        case paused(remaining: TimeInterval)
+    }
+    private var autoCloseState = AutoCloseState.idle
+    private var autoCloseGeneration: UInt = 0
+    private static let minimumAutoCloseGrace: TimeInterval = 1.5
     /// 撮像とクリック転送が同じ一時展開を共有できるよう、所有者数を保持する。
     private var captureExpansionDepth = 0
-    private var rehideDeadline: TimeInterval?
-    private var remainingRehideInterval: TimeInterval?
 
     // サブ区切りの実行時の有効化/無効化で区切りを追加生成するために保持する。
     private let statusItemFactory: (String) -> any StatusItem
@@ -70,14 +73,10 @@ public final class SectionManager {
     public init(
         settings: SettingsStore,
         rehideTimer: any RehideTimerScheduling = FoundationRehideTimerScheduler(),
-        currentTime: @escaping @MainActor () -> TimeInterval = {
-            ProcessInfo.processInfo.systemUptime
-        },
         statusItemFactory: @escaping (String) -> any StatusItem
     ) {
         self.settings = settings
         self.rehideTimer = rehideTimer
-        self.currentTime = currentTime
         self.statusItemFactory = statusItemFactory
 
         // 生成順が並び順を決める: NSStatusItem は後から作られたものほど左に並ぶため、
@@ -135,7 +134,7 @@ public final class SectionManager {
 
     public func toggleSubBar() {
         if alwaysHiddenSection.isVisible {
-            rehideAlwaysHiddenSection()
+            hideAlwaysHiddenSection()
         }
         onSubBarToggleRequested?()
     }
@@ -149,9 +148,9 @@ public final class SectionManager {
             accessibilityDescription: Self.toggleItemAccessibilityDescription
         )
         if open {
-            scheduleRehideIfEnabled()
+            scheduleAutoCloseIfEnabled()
         } else {
-            cancelPendingRehide()
+            cancelPendingAutoClose()
         }
     }
 
@@ -195,10 +194,10 @@ public final class SectionManager {
                 alwaysHiddenSectionExpandedLength = item.length
                 alwaysHiddenSection.dividerItem = item
             }
-            rehideAlwaysHiddenSection()
+            hideAlwaysHiddenSection()
         } else {
             if alwaysHiddenSection.isVisible {
-                rehideAlwaysHiddenSection()
+                hideAlwaysHiddenSection()
             }
             // isVisible=false は autosaveName に永続化され次回生成時も不可視になる。
             // 必ず remove() でステータスバーから取り除く（リークと永続化の両方を防ぐ）。
@@ -241,7 +240,7 @@ public final class SectionManager {
         alwaysHiddenSection.isVisible = true
     }
 
-    public func rehideAlwaysHiddenSection() {
+    public func hideAlwaysHiddenSection() {
         let wasTemporarilyShown = alwaysHiddenSection.isVisible
         guard let dividerItem = alwaysHiddenSection.dividerItem else {
             alwaysHiddenSection.isVisible = false
@@ -260,88 +259,120 @@ public final class SectionManager {
 
     /// 設定画面などで自動クローズ設定が変更された際に呼ぶ。
     /// サブバー表示中の有効化・秒数変更は、新しい全秒数でスケジュールし直す。
-    public func autoRehideSettingDidChange() {
-        if settings.autoRehideEnabled {
+    public func autoCloseSettingDidChange() {
+        if settings.autoCloseEnabled {
             if isSubBarOpen {
-                cancelPendingRehide()
-                scheduleRehideIfEnabled()
+                // 秒数変更は残時間の割合を引き継がず、新しい設定値の全秒数で
+                // カウントダウンをリセットする。設定操作直後の予測可能性を優先する。
+                cancelPendingAutoClose()
+                scheduleAutoCloseIfEnabled()
             }
         } else {
-            cancelPendingRehide()
+            cancelPendingAutoClose()
         }
     }
 
-    private func scheduleRehideIfEnabled(after interval: TimeInterval? = nil) {
-        guard settings.autoRehideEnabled, isSubBarOpen else {
+    public func beginAutoClosePause(source: AutoClosePauseSource) {
+        autoClosePauseCountsBySource[source, default: 0] += 1
+        autoClosePauseCount += 1
+        guard autoClosePauseCount == 1, isSubBarOpen else { return }
+        pausePendingAutoClose()
+    }
+
+    public func endAutoClosePause(source: AutoClosePauseSource) {
+        guard let sourceCount = autoClosePauseCountsBySource[source], sourceCount > 0 else {
+            return
+        }
+        if sourceCount == 1 {
+            autoClosePauseCountsBySource.removeValue(forKey: source)
+        } else {
+            autoClosePauseCountsBySource[source] = sourceCount - 1
+        }
+        autoClosePauseCount -= 1
+        guard autoClosePauseCount == 0, isSubBarOpen else { return }
+        resumePendingAutoClose()
+    }
+
+    /// didEnd 欠落などで発生源の対応関係を再構築できない場合の復旧手段。
+    public func resetAutoClosePauses() {
+        guard autoClosePauseCount > 0 else { return }
+        autoClosePauseCountsBySource.removeAll()
+        autoClosePauseCount = 0
+        guard isSubBarOpen else { return }
+        resumePendingAutoClose()
+    }
+
+    private func scheduleAutoCloseIfEnabled(after interval: TimeInterval? = nil) {
+        guard settings.autoCloseEnabled, isSubBarOpen else {
             return
         }
 
-        let delay = interval ?? TimeInterval(settings.autoRehideSeconds)
-        if isMenuTrackingActive {
-            isRehideDeferred = true
-            remainingRehideInterval = delay
+        let delay = interval ?? TimeInterval(settings.autoCloseSeconds)
+        if isAutoClosePaused {
+            autoCloseState = .paused(remaining: delay)
             return
         }
 
-        isRehideDeferred = false
-        remainingRehideInterval = nil
-        isRehideScheduled = true
-        rehideDeadline = currentTime() + delay
+        autoCloseGeneration &+= 1
+        let generation = autoCloseGeneration
+        autoCloseState = .scheduled(
+            deadline: rehideTimer.now + delay,
+            generation: generation
+        )
         rehideTimer.schedule(after: delay) {
             [weak self] in
-            self?.rehideTimerFired()
+            self?.autoCloseTimerFired(generation: generation)
         }
     }
 
-    private func rehideTimerFired() {
-        // 単発タイマーは発火時点で消費済み。通常はメニュー開始時にキャンセル
-        // されるが、発火との競合時にも追跡中のクローズを避ける。
-        isRehideScheduled = false
-        rehideDeadline = nil
+    private func autoCloseTimerFired(generation: UInt) {
+        guard case let .scheduled(deadline, activeGeneration) = autoCloseState,
+              activeGeneration == generation
+        else { return }
+        autoCloseState = .idle
         guard isSubBarOpen else { return }
 
         // スケジュール後に設定が無効化されたケースを発火時点で尊重する。
-        guard settings.autoRehideEnabled else { return }
+        guard settings.autoCloseEnabled else { return }
 
-        if isMenuTrackingActive {
-            isRehideDeferred = true
-            remainingRehideInterval = 0
+        if isAutoClosePaused {
+            let remaining = rehideTimer.remainingTime(until: deadline)
+            autoCloseState = .paused(
+                remaining: max(Self.minimumAutoCloseGrace, remaining)
+            )
             return
         }
 
         onSubBarCloseRequested?()
     }
 
-    private func pausePendingRehide() {
-        guard settings.autoRehideEnabled else { return }
+    private func pausePendingAutoClose() {
+        guard settings.autoCloseEnabled else { return }
 
-        if isRehideScheduled {
-            let deadline = rehideDeadline ?? currentTime()
-            remainingRehideInterval = max(0, deadline - currentTime())
+        switch autoCloseState {
+        case let .scheduled(deadline, _):
+            let remaining = rehideTimer.remainingTime(until: deadline)
             rehideTimer.cancel()
-            isRehideScheduled = false
-            rehideDeadline = nil
-        } else if remainingRehideInterval == nil {
-            remainingRehideInterval = TimeInterval(settings.autoRehideSeconds)
+            autoCloseState = .paused(remaining: remaining)
+        case .idle:
+            autoCloseState = .paused(remaining: TimeInterval(settings.autoCloseSeconds))
+        case .paused:
+            break
         }
-        isRehideDeferred = true
     }
 
-    private func resumePendingRehide() {
-        guard isRehideDeferred else { return }
-        let remaining = remainingRehideInterval
-        isRehideDeferred = false
-        remainingRehideInterval = nil
-        scheduleRehideIfEnabled(after: remaining)
+    private func resumePendingAutoClose() {
+        guard case let .paused(remaining) = autoCloseState else { return }
+        autoCloseState = .idle
+        scheduleAutoCloseIfEnabled(
+            after: max(Self.minimumAutoCloseGrace, remaining)
+        )
     }
 
-    private func cancelPendingRehide() {
-        isRehideDeferred = false
-        remainingRehideInterval = nil
-        rehideDeadline = nil
-        if isRehideScheduled {
+    private func cancelPendingAutoClose() {
+        if case .scheduled = autoCloseState {
             rehideTimer.cancel()
-            isRehideScheduled = false
         }
+        autoCloseState = .idle
     }
 }
