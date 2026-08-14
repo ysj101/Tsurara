@@ -5,31 +5,29 @@ import TsuraraCore
 
 @MainActor
 final class SystemAccessibilityPermissionManager: AccessibilityPermissionManaging {
-    private enum Key {
-        static let hasRequestedAccess = "accessibilityPermission.hasRequestedAccess"
-    }
+    private let manager: AccessibilityPermissionManager
 
-    private let defaults: UserDefaults
-
-    init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
+    init(settings: SettingsStore = SettingsStore()) {
+        manager = AccessibilityPermissionManager(
+            settings: settings,
+            preflightAccess: { AXIsProcessTrusted() },
+            requestAccess: {
+                // kAXTrustedCheckOptionPrompt は SDK 上 mutable global として輸入され、
+                // Swift 6 の actor 分離から参照できないため公開定数の値を使う。
+                let promptKey = "AXTrustedCheckOptionPrompt"
+                return AXIsProcessTrustedWithOptions(
+                    [promptKey: true] as CFDictionary
+                )
+            }
+        )
     }
 
     var status: AccessibilityPermissionStatus {
-        if AXIsProcessTrusted() {
-            return .authorized
-        }
-        return defaults.bool(forKey: Key.hasRequestedAccess)
-            ? .denied
-            : .notDetermined
+        manager.status
     }
 
-    func requestAccess() -> Bool {
-        defaults.set(true, forKey: Key.hasRequestedAccess)
-        // kAXTrustedCheckOptionPrompt は SDK 上 mutable global として輸入され、Swift 6
-        // の actor 分離から参照できない。公開定数の値を使って同じ options を組む。
-        let promptKey = "AXTrustedCheckOptionPrompt"
-        return AXIsProcessTrustedWithOptions([promptKey: true] as CFDictionary)
+    func requestAccess() -> AccessibilityPermissionRequestResult {
+        manager.requestAccess()
     }
 }
 
@@ -40,30 +38,24 @@ final class AccessibilityPermissionOnboardingController {
         string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
     )!
 
-    private let flow: AccessibilityPermissionFlow
+    private let permission: any AccessibilityPermissionManaging
+    private var isPresentingAlert = false
 
     init(
         permission: any AccessibilityPermissionManaging =
             SystemAccessibilityPermissionManager()
     ) {
-        flow = AccessibilityPermissionFlow(permission: permission)
+        self.permission = permission
     }
 
     func forwardClickIfPermitted(_ forwardClick: () -> Void) {
-        handle(flow.actionForClickRequest(), forwardClick: forwardClick)
-    }
-
-    private func handle(
-        _ action: AccessibilityPermissionAction,
-        forwardClick: () -> Void
-    ) {
-        switch action {
-        case .forwardClick:
+        switch permission.status {
+        case .authorized:
             forwardClick()
-        case .showOnboarding:
+        case .notDetermined:
             showOnboarding(forwardClick: forwardClick)
-        case .showDeniedFallback:
-            showDeniedFallback()
+        case .requestPreviouslyPresented:
+            showPermissionFallback(forwardClick: forwardClick)
         }
     }
 
@@ -75,21 +67,52 @@ final class AccessibilityPermissionOnboardingController {
         alert.addButton(withTitle: "続ける")
         alert.addButton(withTitle: "今はしない")
 
-        NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        handle(flow.requestAccess(), forwardClick: forwardClick)
+        guard runModal(alert) == .alertFirstButtonReturn else { return }
+        // AXIsProcessTrustedWithOptions も初回プロンプトへの回答を待たず false を
+        // 返す。システムプロンプトの上へ拒否アラートを重ねず、次回に再確認する。
+        if permission.requestAccess() == .authorized {
+            forwardClick()
+        }
     }
 
-    private func showDeniedFallback() {
+    private func showPermissionFallback(forwardClick: () -> Void) {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "アクセシビリティが許可されていません"
-        alert.informativeText = "サブバーは引き続き表示できますが、アイコンのクリック転送は無効です。操作を有効にするには、システム設定で Tsurara を許可してください。"
+        alert.messageText = "アクセシビリティの許可を確認できません"
+        alert.informativeText = "サブバーは引き続き表示できますが、アイコンのクリック転送は無効です。システム設定で Tsurara を許可するか、権限をもう一度リクエストしてください。"
         alert.addButton(withTitle: "システム設定を開く")
+        alert.addButton(withTitle: "権限を再リクエスト")
         alert.addButton(withTitle: "キャンセル")
 
+        switch runModal(alert) {
+        case .alertFirstButtonReturn:
+            guard NSWorkspace.shared.open(Self.systemSettingsURL) else {
+                NSLog(
+                    "アクセシビリティのシステム設定を開けませんでした: %@",
+                    Self.systemSettingsURL.absoluteString
+                )
+                return
+            }
+        case .alertSecondButtonReturn:
+            if permission.requestAccess() == .authorized {
+                forwardClick()
+            }
+        default:
+            break
+        }
+    }
+
+    private func runModal(_ alert: NSAlert) -> NSApplication.ModalResponse? {
+        guard !isPresentingAlert else { return nil }
+        isPresentingAlert = true
+        let shouldDeactivateAfterward = !NSApp.isActive
+        defer {
+            isPresentingAlert = false
+            if shouldDeactivateAfterward {
+                NSApp.deactivate()
+            }
+        }
         NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        NSWorkspace.shared.open(Self.systemSettingsURL)
+        return alert.runModal()
     }
 }

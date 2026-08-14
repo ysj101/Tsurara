@@ -6,7 +6,7 @@ import TsuraraCore
 final class AppKitMenuBarItemCapturePositioner: MenuBarItemCapturePositioning {
     private let sectionManager: SectionManager
     private let screenFrames: () -> [CGRect]
-    private var ownsCaptureExpansion = false
+    private var ownedExpansionCount = 0
 
     init(
         sectionManager: SectionManager,
@@ -18,8 +18,9 @@ final class AppKitMenuBarItemCapturePositioner: MenuBarItemCapturePositioning {
 
     func prepareForCapture(of windows: [MenuBarItemWindow]) -> Bool {
         guard windows.contains(where: { !isVisibleOnMenuBar($0) }) else { return false }
-        ownsCaptureExpansion = sectionManager.beginCaptureExpansion()
-        return ownsCaptureExpansion
+        guard sectionManager.beginCaptureExpansion() else { return false }
+        ownedExpansionCount += 1
+        return true
     }
 
     func isReadyForCapture(_ window: MenuBarItemWindow) -> Bool {
@@ -27,9 +28,9 @@ final class AppKitMenuBarItemCapturePositioner: MenuBarItemCapturePositioning {
     }
 
     func restoreAfterCapture() {
-        guard ownsCaptureExpansion else { return }
+        guard ownedExpansionCount > 0 else { return }
+        ownedExpansionCount -= 1
         sectionManager.endCaptureExpansion()
-        ownsCaptureExpansion = false
     }
 
     private func isVisibleOnMenuBar(_ window: MenuBarItemWindow) -> Bool {

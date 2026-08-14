@@ -216,4 +216,48 @@ struct SectionManagerToggleTests {
         #expect(manager.hiddenSection.isVisible)
         #expect(mainDivider.length == StatusItemLength.square)
     }
+
+    @Test
+    func overlappingCaptureExpansionsRestoreOnlyAfterLastOwnerFinishes() {
+        let initialLength: CGFloat = 42
+        let toggleItem = MockStatusItem(length: StatusItemLength.square)
+        let mainDivider = MockStatusItem(length: initialLength)
+        var items = [toggleItem, mainDivider]
+        let manager = SectionManager(settings: makeToggleSettings()) { _ in
+            items.removeFirst()
+        }
+        manager.toggleHiddenSection()
+
+        #expect(manager.beginCaptureExpansion())
+        #expect(manager.beginCaptureExpansion())
+        manager.endCaptureExpansion()
+
+        #expect(manager.hiddenSection.isVisible)
+        #expect(mainDivider.length == initialLength)
+
+        manager.endCaptureExpansion()
+
+        #expect(manager.isHiddenSectionCollapsed)
+        #expect(mainDivider.length == SectionManager.hiddenSectionCollapsedLength)
+    }
+
+    @Test
+    func extraExpansionEndDoesNotAlterRestoredState() {
+        let initialLength: CGFloat = 42
+        let toggleItem = MockStatusItem(length: StatusItemLength.square)
+        let mainDivider = MockStatusItem(length: initialLength)
+        var items = [toggleItem, mainDivider]
+        let manager = SectionManager(settings: makeToggleSettings()) { _ in
+            items.removeFirst()
+        }
+
+        #expect(manager.beginCaptureExpansion())
+        manager.endCaptureExpansion()
+        let historyAfterRestore = mainDivider.lengthHistory
+
+        manager.endCaptureExpansion()
+
+        #expect(mainDivider.length == initialLength)
+        #expect(mainDivider.lengthHistory == historyAfterRestore)
+    }
 }

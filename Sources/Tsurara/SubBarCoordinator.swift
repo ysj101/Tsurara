@@ -35,6 +35,7 @@ final class SubBarCoordinator {
     }
 
     func toggle() {
+        forwardingTask?.cancel()
         switch presentationController.toggle() {
         case let .beginOpening(generation):
             var didPermitOpening = false
@@ -54,12 +55,10 @@ final class SubBarCoordinator {
         closeSubBar()
     }
 
-    private func closeSubBar(cancelForwarding: Bool = true) {
+    private func closeSubBar() {
         captureTask?.cancel()
         captureTask = nil
-        if cancelForwarding {
-            forwardingTask?.cancel()
-        }
+        forwardingTask?.cancel()
         presentationController.close()
     }
 
@@ -67,7 +66,6 @@ final class SubBarCoordinator {
         on item: ImagedMenuBarItem,
         button: MenuBarItemClickButton
     ) {
-        guard forwardingTask == nil else { return }
         accessibilityPermissionController.forwardClickIfPermitted {
             [weak self] in
             self?.startForwardingClick(on: item, button: button)
@@ -78,9 +76,10 @@ final class SubBarCoordinator {
         on item: ImagedMenuBarItem,
         button: MenuBarItemClickButton
     ) {
+        guard forwardingTask == nil else { return }
         // 実アイテムのメニューとパネルが重ならないよう、許可済みの場合だけ閉じる。
         // 権限がない経路ではサブバーを表示したままにし、クリック転送だけを無効化する。
-        closeSubBar(cancelForwarding: false)
+        closeSubBar()
         manager.isMenuTrackingActive = true
         forwardingTask = Task { @MainActor [weak self] in
             guard let self else { return }

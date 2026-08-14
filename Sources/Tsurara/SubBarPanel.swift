@@ -204,6 +204,7 @@ final class SubBarPanel: NSPanel, SubBarPanelPresenting {
 @MainActor
 private final class SubBarItemView: NSImageView {
     var onClick: ((MenuBarItemClickButton) -> Void)?
+    private var pressedButton: MenuBarItemClickButton?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -217,11 +218,27 @@ private final class SubBarItemView: NSImageView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    override func mouseDown(with event: NSEvent) {
+        pressedButton = event.modifierFlags.contains(.control) ? .right : .left
+    }
+
     override func mouseUp(with event: NSEvent) {
-        onClick?(event.modifierFlags.contains(.control) ? .right : .left)
+        finishClick(with: event)
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        pressedButton = .right
     }
 
     override func rightMouseUp(with event: NSEvent) {
-        onClick?(.right)
+        finishClick(with: event)
+    }
+
+    private func finishClick(with event: NSEvent) {
+        guard let pressedButton else { return }
+        self.pressedButton = nil
+        let location = convert(event.locationInWindow, from: nil)
+        guard bounds.contains(location) else { return }
+        onClick?(pressedButton)
     }
 }

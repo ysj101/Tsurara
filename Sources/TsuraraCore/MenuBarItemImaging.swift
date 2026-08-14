@@ -116,7 +116,8 @@ public protocol MenuBarItemImageCapturing: AnyObject {
 /// 画面外へ押し出された項目を撮像可能な位置へ一時的に戻す操作の抽象化。
 @MainActor
 public protocol MenuBarItemCapturePositioning: AnyObject {
-    /// 実際に位置を変えた場合だけ true を返す。true の場合、呼び出し側が再列挙する。
+    /// 一時展開の所有権を取得した場合に true を返す。true の場合、呼び出し側は
+    /// 再列挙したうえで、処理終了時に restoreAfterCapture を必ず1回呼ぶ。
     func prepareForCapture(of windows: [MenuBarItemWindow]) -> Bool
     func isReadyForCapture(_ window: MenuBarItemWindow) -> Bool
     func restoreAfterCapture()

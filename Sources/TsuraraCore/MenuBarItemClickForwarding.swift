@@ -6,22 +6,18 @@ public enum MenuBarItemClickButton: Equatable, Sendable {
     case right
 }
 
-public enum MenuBarItemClickForwardingState: Equatable, Sendable {
-    case idle
-    case preparing
-    case forwarding
-    case waitingForInterfaceDismissal
-}
-
 public enum MenuBarItemClickForwardingError: Error, Equatable {
-    case operationInProgress
     case windowNotFound(windowID: CGWindowID)
 }
 
 /// Core の転送フローから CGEvent の生成・送出を分離する境界。
 @MainActor
 public protocol MenuBarItemClickSending: AnyObject {
-    func sendClick(at point: CGPoint, button: MenuBarItemClickButton) async throws
+    func sendClick(
+        at point: CGPoint,
+        button: MenuBarItemClickButton,
+        ownerPID: pid_t
+    ) async throws
 }
 
 /// クリックで現れたメニュー／ポップオーバーの終了待ちを OS 実装から分離する境界。
@@ -52,8 +48,6 @@ public protocol MenuBarItemClickForwarding: AnyObject {
 public final class MenuBarItemClickForwardingController:
     MenuBarItemClickForwarding
 {
-    public private(set) var state: MenuBarItemClickForwardingState = .idle
-
     private let windowLister: any MenuBarItemWindowListing
     private let positioner: any MenuBarItemCapturePositioning
     private let clickSender: any MenuBarItemClickSending
@@ -75,17 +69,11 @@ public final class MenuBarItemClickForwardingController:
         on item: ImagedMenuBarItem,
         button: MenuBarItemClickButton
     ) async throws {
-        guard state == .idle else {
-            throw MenuBarItemClickForwardingError.operationInProgress
-        }
-
-        state = .preparing
         var didReposition = false
         defer {
             if didReposition {
                 positioner.restoreAfterCapture()
             }
-            state = .idle
         }
 
         // ImagedMenuBarItem.frame は撮像の一時展開中の座標になり得る。クリック時点の
@@ -115,13 +103,12 @@ public final class MenuBarItemClickForwardingController:
         interfaceTracker.prepareForClick(
             ownerPID: currentWindow.owner.processIdentifier
         )
-        state = .forwarding
         try await clickSender.sendClick(
             at: CGPoint(x: currentWindow.frame.midX, y: currentWindow.frame.midY),
-            button: button
+            button: button,
+            ownerPID: currentWindow.owner.processIdentifier
         )
 
-        state = .waitingForInterfaceDismissal
         try await interfaceTracker.waitUntilInterfaceDismissed()
     }
 }

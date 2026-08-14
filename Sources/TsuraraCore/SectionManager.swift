@@ -59,6 +59,8 @@ public final class SectionManager {
     private var isRehideDeferred = false
     /// 撮像中は区切りを展開したままにし、トグルの最終状態だけをここへ合流する。
     private var captureDesiredCollapsedState: Bool?
+    /// 撮像とクリック転送が同じ一時展開を共有できるよう、所有者数を保持する。
+    private var captureExpansionDepth = 0
 
     // サブ区切りの実行時の有効化/無効化で区切りを追加生成するために保持する。
     private let statusItemFactory: (String) -> any StatusItem
@@ -144,10 +146,14 @@ public final class SectionManager {
     /// 押し出された項目を WindowServer に再配置させる。
     @discardableResult
     public func beginCaptureExpansion() -> Bool {
-        guard captureDesiredCollapsedState == nil,
-              let dividerItem = hiddenSection.dividerItem
-        else { return false }
+        guard let dividerItem = hiddenSection.dividerItem else { return false }
 
+        if captureExpansionDepth > 0 {
+            captureExpansionDepth += 1
+            return true
+        }
+
+        captureExpansionDepth = 1
         captureDesiredCollapsedState = isHiddenSectionCollapsed
         dividerItem.length = Self.hiddenSectionCollapsedLength
         dividerItem.length = hiddenSectionExpandedLength
@@ -161,6 +167,9 @@ public final class SectionManager {
 
     /// 撮像開始時の状態と撮像中のトグル操作を合流した最終状態を反映する。
     public func endCaptureExpansion() {
+        guard captureExpansionDepth > 0 else { return }
+        captureExpansionDepth -= 1
+        guard captureExpansionDepth == 0 else { return }
         guard let desiredCollapsed = captureDesiredCollapsedState else { return }
         captureDesiredCollapsedState = nil
         setHiddenSectionCollapsed(desiredCollapsed)

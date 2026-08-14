@@ -43,13 +43,18 @@ private final class StubClickSender: MenuBarItemClickSending {
     struct SentClick: Equatable {
         let point: CGPoint
         let button: MenuBarItemClickButton
+        let ownerPID: pid_t
     }
 
     var error: Error?
     private(set) var clicks: [SentClick] = []
 
-    func sendClick(at point: CGPoint, button: MenuBarItemClickButton) async throws {
-        clicks.append(SentClick(point: point, button: button))
+    func sendClick(
+        at point: CGPoint,
+        button: MenuBarItemClickButton,
+        ownerPID: pid_t
+    ) async throws {
+        clicks.append(SentClick(point: point, button: button, ownerPID: ownerPID))
         if let error { throw error }
     }
 }
@@ -71,22 +76,6 @@ private final class StubInterfaceTracker: MenuBarItemInterfaceTracking {
 }
 
 @MainActor
-private final class StubAccessibilityPermission: AccessibilityPermissionManaging {
-    var status: AccessibilityPermissionStatus
-    var requestResult: Bool
-    private(set) var requestCount = 0
-
-    init(status: AccessibilityPermissionStatus, requestResult: Bool = false) {
-        self.status = status
-        self.requestResult = requestResult
-    }
-
-    func requestAccess() -> Bool {
-        requestCount += 1
-        return requestResult
-    }
-}
-
 private func clickWindow(
     id: CGWindowID = 42,
     frame: CGRect,
@@ -159,12 +148,11 @@ struct MenuBarItemClickForwardingTests {
 
         #expect(positioner.preparedWindowIDs == [42])
         #expect(sender.clicks == [
-            .init(point: CGPoint(x: 412, y: 12), button: .left)
+            .init(point: CGPoint(x: 412, y: 12), button: .left, ownerPID: 123)
         ])
         #expect(tracker.preparedOwnerPIDs == [123])
         #expect(tracker.waitCount == 1)
         #expect(positioner.restoreCount == 1)
-        #expect(controller.state == .idle)
     }
 
     @Test
@@ -188,7 +176,7 @@ struct MenuBarItemClickForwardingTests {
         )
 
         #expect(sender.clicks == [
-            .init(point: CGPoint(x: 110, y: 13), button: .right)
+            .init(point: CGPoint(x: 110, y: 13), button: .right, ownerPID: 123)
         ])
         #expect(positioner.restoreCount == 0)
     }
@@ -218,7 +206,6 @@ struct MenuBarItemClickForwardingTests {
         }
 
         #expect(positioner.restoreCount == 1)
-        #expect(controller.state == .idle)
     }
 
     @Test
@@ -248,7 +235,6 @@ struct MenuBarItemClickForwardingTests {
         }
 
         #expect(positioner.restoreCount == 1)
-        #expect(controller.state == .idle)
     }
 
     @Test
@@ -276,53 +262,5 @@ struct MenuBarItemClickForwardingTests {
 
         #expect(sender.clicks.isEmpty)
         #expect(positioner.restoreCount == 1)
-    }
-}
-
-@Suite
-@MainActor
-struct AccessibilityPermissionFlowTests {
-    @Test
-    func authorizedPermissionAllowsClickWithoutRequestingAgain() {
-        let permission = StubAccessibilityPermission(status: .authorized)
-        let flow = AccessibilityPermissionFlow(permission: permission)
-
-        #expect(flow.actionForClickRequest() == .forwardClick)
-        #expect(permission.requestCount == 0)
-    }
-
-    @Test
-    func deniedPermissionDisablesOnlyClickForwarding() {
-        let permission = StubAccessibilityPermission(status: .denied)
-        let flow = AccessibilityPermissionFlow(permission: permission)
-
-        #expect(flow.actionForClickRequest() == .showDeniedFallback)
-        #expect(permission.requestCount == 0)
-    }
-
-    @Test
-    func undeterminedPermissionShowsOnboardingBeforeSystemPrompt() {
-        let permission = StubAccessibilityPermission(status: .notDetermined)
-        let flow = AccessibilityPermissionFlow(permission: permission)
-
-        #expect(flow.actionForClickRequest() == .showOnboarding)
-        #expect(permission.requestCount == 0)
-    }
-
-    @Test
-    func requestingPermissionForwardsOnlyWhenImmediatelyAuthorized() {
-        let granted = StubAccessibilityPermission(status: .denied, requestResult: true)
-        let denied = StubAccessibilityPermission(status: .denied, requestResult: false)
-
-        #expect(
-            AccessibilityPermissionFlow(permission: granted).requestAccess()
-                == .forwardClick
-        )
-        #expect(
-            AccessibilityPermissionFlow(permission: denied).requestAccess()
-                == .showDeniedFallback
-        )
-        #expect(granted.requestCount == 1)
-        #expect(denied.requestCount == 1)
     }
 }

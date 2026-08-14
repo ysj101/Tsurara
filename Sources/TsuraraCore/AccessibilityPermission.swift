@@ -1,46 +1,30 @@
-/// 合成クリックに必要なアクセシビリティ権限の状態。
-public enum AccessibilityPermissionStatus: Equatable, Sendable {
-    case authorized
-    case notDetermined
-    case denied
-}
+/// Accessibility と画面収録は、どちらもシステム API が初回プロンプトへの
+/// 回答を待たず false を返す。同じ pending 状態機械を共有し、false を拒否と
+/// 誤判定しない。
+public typealias AccessibilityPermissionStatus = SystemPermissionStatus
+public typealias AccessibilityPermissionRequestResult = SystemPermissionRequestResult
+public typealias AccessibilityPermissionManaging = SystemPermissionManaging
 
-/// macOS の Accessibility API を Core のフロー制御から分離する。
 @MainActor
-public protocol AccessibilityPermissionManaging: AnyObject {
-    var status: AccessibilityPermissionStatus { get }
+public final class AccessibilityPermissionManager: AccessibilityPermissionManaging {
+    private let manager: SystemPermissionManager
 
-    @discardableResult
-    func requestAccess() -> Bool
-}
-
-public enum AccessibilityPermissionAction: Equatable, Sendable {
-    case forwardClick
-    case showOnboarding
-    case showDeniedFallback
-}
-
-/// サブバー表示ではなく、実アイテムへの合成クリックだけを権限でガードする。
-@MainActor
-public struct AccessibilityPermissionFlow {
-    private let permission: any AccessibilityPermissionManaging
-
-    public init(permission: any AccessibilityPermissionManaging) {
-        self.permission = permission
+    public init(
+        settings: SettingsStore,
+        preflightAccess: @escaping () -> Bool,
+        requestAccess: @escaping () -> Bool
+    ) {
+        manager = SystemPermissionManager(
+            wasRequestPresented: { settings.hasRequestedAccessibilityAccess },
+            setRequestPresented: { settings.hasRequestedAccessibilityAccess = $0 },
+            preflightAccess: preflightAccess,
+            requestAccess: requestAccess
+        )
     }
 
-    public func actionForClickRequest() -> AccessibilityPermissionAction {
-        switch permission.status {
-        case .authorized:
-            return .forwardClick
-        case .notDetermined:
-            return .showOnboarding
-        case .denied:
-            return .showDeniedFallback
-        }
-    }
+    public var status: AccessibilityPermissionStatus { manager.status }
 
-    public func requestAccess() -> AccessibilityPermissionAction {
-        permission.requestAccess() ? .forwardClick : .showDeniedFallback
+    public func requestAccess() -> AccessibilityPermissionRequestResult {
+        manager.requestAccess()
     }
 }

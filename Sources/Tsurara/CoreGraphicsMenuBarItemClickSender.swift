@@ -11,9 +11,11 @@ enum CoreGraphicsMenuBarItemClickError: Error {
 final class CoreGraphicsMenuBarItemClickSender: MenuBarItemClickSending {
     func sendClick(
         at point: CGPoint,
-        button: MenuBarItemClickButton
+        button: MenuBarItemClickButton,
+        ownerPID: pid_t
     ) async throws {
-        guard let source = CGEventSource(stateID: .hidSystemState) else {
+        // privateState を使い、生成時点の実キーボード修飾状態を継承しない。
+        guard let source = CGEventSource(stateID: .privateState) else {
             throw CoreGraphicsMenuBarItemClickError.eventSourceCreationFailed
         }
 
@@ -44,10 +46,19 @@ final class CoreGraphicsMenuBarItemClickSender: MenuBarItemClickSending {
 
         mouseDown.setIntegerValueField(.mouseEventClickState, value: 1)
         mouseUp.setIntegerValueField(.mouseEventClickState, value: 1)
-        mouseDown.post(tap: .cghidEventTap)
+        // control+クリックを右クリックへ変換した後も maskControl を残さない。
+        mouseDown.flags = []
+        mouseUp.flags = []
+
+        // HID tap への投稿は実カーソルを対象座標へワープさせる。対象プロセスへ
+        // 直接配送すれば、他プロセスと実カーソルへ副作用を広げずに済む。
+        mouseDown.postToPid(ownerPID)
+        defer {
+            // sleep のキャンセルも含め、down を送った全経路で必ず up を対にする。
+            mouseUp.postToPid(ownerPID)
+        }
         // down/up を同一 run-loop tick に詰めると一部の常駐アプリが up を落とすため、
         // 人間のクリックより十分短い間隔だけ空ける。
         try await Task.sleep(for: .milliseconds(10))
-        mouseUp.post(tap: .cghidEventTap)
     }
 }
