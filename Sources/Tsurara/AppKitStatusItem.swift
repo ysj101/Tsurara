@@ -8,6 +8,14 @@ final class AppKitStatusItem: NSObject, StatusItem {
 
     private var statusItem: NSStatusItem { underlying }
 
+    /// CGWindowList / ScreenCaptureKit で同じ NSStatusItem ウィンドウを解決する ID。
+    var windowID: CGWindowID? {
+        guard let number = statusItem.button?.window?.windowNumber, number > 0 else {
+            return nil
+        }
+        return CGWindowID(number)
+    }
+
     var length: CGFloat {
         get { statusItem.length }
         set { statusItem.length = newValue }
