@@ -24,6 +24,8 @@ public final class SettingsStore: @unchecked Sendable {
         case toggleHotkey = "com.ysj.Tsurara.toggleHotkey"
         case hasRequestedScreenCaptureAccess =
             "com.ysj.Tsurara.hasRequestedScreenCaptureAccess"
+        case hasRequestedAccessibilityAccess =
+            "com.ysj.Tsurara.hasRequestedAccessibilityAccess"
     }
 
     private let defaults: UserDefaults
@@ -89,6 +91,22 @@ public final class SettingsStore: @unchecked Sendable {
                 defaults.set(true, forKey: Key.hasRequestedScreenCaptureAccess.rawValue)
             } else {
                 defaults.removeObject(forKey: Key.hasRequestedScreenCaptureAccess.rawValue)
+            }
+        }
+    }
+
+    /// Accessibility のシステムプロンプトを提示した事実だけを保持する。
+    /// AX API の false は回答待ちも含むため、拒否済みの断定には使わない。
+    public var hasRequestedAccessibilityAccess: Bool {
+        get {
+            defaults.object(forKey: Key.hasRequestedAccessibilityAccess.rawValue)
+                as? Bool ?? false
+        }
+        set {
+            if newValue {
+                defaults.set(true, forKey: Key.hasRequestedAccessibilityAccess.rawValue)
+            } else {
+                defaults.removeObject(forKey: Key.hasRequestedAccessibilityAccess.rawValue)
             }
         }
     }

@@ -9,23 +9,33 @@ final class SubBarCoordinator {
     private let imager: MenuBarItemImager
     private let permissionController: ScreenCapturePermissionOnboardingController
     private let presentationController: SubBarPresentationController
+    private let clickForwarder: any MenuBarItemClickForwarding
+    private let accessibilityPermissionController:
+        AccessibilityPermissionOnboardingController
     private var captureTask: Task<Void, Never>?
+    private var forwardingTask: Task<Void, Never>?
 
     init(
         manager: SectionManager,
         toggleItem: AppKitStatusItem,
         imager: MenuBarItemImager,
         permissionController: ScreenCapturePermissionOnboardingController,
-        presentationController: SubBarPresentationController
+        presentationController: SubBarPresentationController,
+        clickForwarder: any MenuBarItemClickForwarding,
+        accessibilityPermissionController:
+            AccessibilityPermissionOnboardingController
     ) {
         self.manager = manager
         self.toggleItem = toggleItem
         self.imager = imager
         self.permissionController = permissionController
         self.presentationController = presentationController
+        self.clickForwarder = clickForwarder
+        self.accessibilityPermissionController = accessibilityPermissionController
     }
 
     func toggle() {
+        forwardingTask?.cancel()
         switch presentationController.toggle() {
         case let .beginOpening(generation):
             var didPermitOpening = false
@@ -37,15 +47,54 @@ final class SubBarCoordinator {
                 presentationController.close(generation: generation)
             }
         case .close:
-            captureTask?.cancel()
-            captureTask = nil
+            closeSubBar()
         }
     }
 
     func close() {
+        closeSubBar()
+    }
+
+    private func closeSubBar() {
         captureTask?.cancel()
         captureTask = nil
+        forwardingTask?.cancel()
         presentationController.close()
+    }
+
+    func forwardClick(
+        on item: ImagedMenuBarItem,
+        button: MenuBarItemClickButton
+    ) {
+        accessibilityPermissionController.forwardClickIfPermitted {
+            [weak self] in
+            self?.startForwardingClick(on: item, button: button)
+        }
+    }
+
+    private func startForwardingClick(
+        on item: ImagedMenuBarItem,
+        button: MenuBarItemClickButton
+    ) {
+        guard forwardingTask == nil else { return }
+        // 実アイテムのメニューとパネルが重ならないよう、許可済みの場合だけ閉じる。
+        // 権限がない経路ではサブバーを表示したままにし、クリック転送だけを無効化する。
+        closeSubBar()
+        manager.isMenuTrackingActive = true
+        forwardingTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                forwardingTask = nil
+                manager.isMenuTrackingActive = false
+            }
+            do {
+                try await clickForwarder.forwardClick(on: item, button: button)
+            } catch is CancellationError {
+                // Core 側の defer が区切りを復元する。終了時の警告は不要。
+            } catch {
+                showForwardingFailure(error)
+            }
+        }
     }
 
     private func startCapture(generation: SubBarPresentationController.Generation) {
@@ -101,6 +150,15 @@ final class SubBarCoordinator {
         alert.informativeText = "メニューバーアイコンの画像取得に失敗しました。\n\(error.localizedDescription)"
         alert.addButton(withTitle: "OK")
         NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
+
+    private func showForwardingFailure(_ error: Error) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "アイコンを操作できませんでした"
+        alert.informativeText = "実際のメニューバーアイコンへのクリック転送に失敗しました。\n\(error.localizedDescription)"
+        alert.addButton(withTitle: "OK")
         alert.runModal()
     }
 }

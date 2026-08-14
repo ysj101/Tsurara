@@ -104,20 +104,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let panel = SubBarPanel()
         let presentationController = SubBarPresentationController(presenter: panel)
+        let windowLister = CGWindowMenuBarItemWindowLister()
+        let positioner = AppKitMenuBarItemCapturePositioner(
+            sectionManager: manager
+        )
         let coordinator = SubBarCoordinator(
             manager: manager,
             toggleItem: toggleItem,
             imager: MenuBarItemImager(
-                windowLister: CGWindowMenuBarItemWindowLister(),
+                windowLister: windowLister,
                 imageCapturer: ScreenCaptureKitMenuBarItemImageCapturer(),
-                capturePositioner: AppKitMenuBarItemCapturePositioner(
-                    sectionManager: manager
-                )
+                capturePositioner: positioner
             ),
             permissionController: ScreenCapturePermissionOnboardingController(),
-            presentationController: presentationController
+            presentationController: presentationController,
+            clickForwarder: MenuBarItemClickForwardingController(
+                windowLister: windowLister,
+                positioner: positioner,
+                clickSender: CoreGraphicsMenuBarItemClickSender(),
+                interfaceTracker: CGWindowMenuBarItemInterfaceTracker()
+            ),
+            accessibilityPermissionController:
+                AccessibilityPermissionOnboardingController()
         )
         panel.onDismissRequest = { [weak coordinator] in coordinator?.close() }
+        panel.onItemClick = { [weak coordinator] item, button in
+            coordinator?.forwardClick(on: item, button: button)
+        }
         manager.onSubBarToggleRequested = { [weak coordinator] in coordinator?.toggle() }
         subBarCoordinator = coordinator
         sectionManager = manager
