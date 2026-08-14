@@ -5,19 +5,20 @@ import Foundation
 public struct MenuBarItemWindow: Equatable, Sendable {
     public let windowID: CGWindowID
     public let frame: CGRect
-    public let ownerPID: pid_t
-    public let ownerName: String
+    public let owner: MenuBarItemOwner
+    /// CGWindow と同じ左上原点座標系で、このウィンドウが属する画面。
+    public let displayFrame: CGRect?
 
     public init(
         windowID: CGWindowID,
         frame: CGRect,
-        ownerPID: pid_t,
-        ownerName: String
+        owner: MenuBarItemOwner,
+        displayFrame: CGRect? = nil
     ) {
         self.windowID = windowID
         self.frame = frame
-        self.ownerPID = ownerPID
-        self.ownerName = ownerName
+        self.owner = owner
+        self.displayFrame = displayFrame
     }
 }
 
@@ -28,6 +29,21 @@ public struct MenuBarItemOwner: Equatable, Sendable {
     public init(processIdentifier: pid_t, name: String) {
         self.processIdentifier = processIdentifier
         self.name = name
+    }
+}
+
+public extension MenuBarItemWindow {
+    /// CG 座標系の画面矩形を使い、実際のメニューバー行に見えているか判定する。
+    func isVisibleOnMenuBar(displayFrames: [CGRect]) -> Bool {
+        displayFrames.contains { display in
+            let menuBarBand = CGRect(
+                x: display.minX,
+                y: display.minY,
+                width: display.width,
+                height: max(64, frame.height)
+            )
+            return frame.intersects(menuBarBand)
+        }
     }
 }
 
@@ -64,6 +80,12 @@ public enum MenuBarItemImagingError: Error, Equatable {
     case dividerWindowNotFound(windowID: CGWindowID)
     /// ScreenCaptureKit の共有可能コンテンツから対象ウィンドウを解決できなかった。
     case captureWindowNotFound(windowID: CGWindowID)
+    /// 同じ Imager に対する撮像要求がすでに進行中。
+    case captureAlreadyInProgress
+}
+
+public enum MenuBarItemWindowListingError: Error, Equatable {
+    case windowListUnavailable
 }
 
 @MainActor
@@ -74,20 +96,26 @@ public protocol MenuBarItemWindowListing: AnyObject {
 @MainActor
 public protocol MenuBarItemImageCapturing: AnyObject {
     func verifyScreenRecordingPermission() throws
-    func capture(windowID: CGWindowID) async throws -> CGImage
+    /// 共有可能コンテンツを一度だけ取得し、撮像できた ID の画像を返す。
+    func capture(windowIDs: [CGWindowID]) async throws -> [CGWindowID: CGImage]
 }
 
 /// 画面外へ押し出された項目を撮像可能な位置へ一時的に戻す操作の抽象化。
 @MainActor
 public protocol MenuBarItemCapturePositioning: AnyObject {
     /// 実際に位置を変えた場合だけ true を返す。true の場合、呼び出し側が再列挙する。
-    func prepareForCapture(of windows: [MenuBarItemWindow]) async -> Bool
+    func prepareForCapture(of windows: [MenuBarItemWindow]) -> Bool
+    func isReadyForCapture(_ window: MenuBarItemWindow) -> Bool
     func restoreAfterCapture()
+}
+
+public extension MenuBarItemCapturePositioning {
+    func isReadyForCapture(_ window: MenuBarItemWindow) -> Bool { true }
 }
 
 @MainActor
 private final class NoopMenuBarItemCapturePositioner: MenuBarItemCapturePositioning {
-    func prepareForCapture(of windows: [MenuBarItemWindow]) async -> Bool { false }
+    func prepareForCapture(of windows: [MenuBarItemWindow]) -> Bool { false }
     func restoreAfterCapture() {}
 }
 
@@ -97,21 +125,34 @@ public final class MenuBarItemImager {
     private let windowLister: any MenuBarItemWindowListing
     private let imageCapturer: any MenuBarItemImageCapturing
     private let capturePositioner: any MenuBarItemCapturePositioning
+    private let repositionPollInterval: Duration
+    private let repositionPollLimit: Int
+    private var isCapturing = false
 
     public init(
         windowLister: any MenuBarItemWindowListing,
         imageCapturer: any MenuBarItemImageCapturing,
-        capturePositioner: (any MenuBarItemCapturePositioning)? = nil
+        capturePositioner: (any MenuBarItemCapturePositioning)? = nil,
+        repositionPollInterval: Duration = .milliseconds(20),
+        repositionPollLimit: Int = 25
     ) {
         self.windowLister = windowLister
         self.imageCapturer = imageCapturer
         self.capturePositioner = capturePositioner ?? NoopMenuBarItemCapturePositioner()
+        self.repositionPollInterval = repositionPollInterval
+        self.repositionPollLimit = max(1, repositionPollLimit)
     }
 
     public func captureHiddenItems(
         mainDividerWindowID: CGWindowID,
         subDividerWindowID: CGWindowID?
     ) async throws -> [ImagedMenuBarItem] {
+        guard !isCapturing else {
+            throw MenuBarItemImagingError.captureAlreadyInProgress
+        }
+        isCapturing = true
+        defer { isCapturing = false }
+
         // length を戻して画面を動かす前に権限を確認する。
         try imageCapturer.verifyScreenRecordingPermission()
 
@@ -122,19 +163,40 @@ public final class MenuBarItemImager {
             subDividerWindowID: subDividerWindowID
         )
 
-        let repositioned = await capturePositioner.prepareForCapture(of: targets)
-        if repositioned {
-            defer { capturePositioner.restoreAfterCapture() }
-            let refreshedByID = Dictionary(
-                uniqueKeysWithValues: try windowLister.listMenuBarItemWindows().map {
-                    ($0.windowID, $0)
-                }
-            )
-            targets = targets.map { refreshedByID[$0.windowID] ?? $0 }
-            return try await capture(targets)
+        let repositioned = capturePositioner.prepareForCapture(of: targets)
+        defer {
+            if repositioned {
+                capturePositioner.restoreAfterCapture()
+            }
         }
 
+        if repositioned {
+            targets = try await waitForRepositionedWindows(targets)
+        }
         return try await capture(targets)
+    }
+
+    private func waitForRepositionedWindows(
+        _ targets: [MenuBarItemWindow]
+    ) async throws -> [MenuBarItemWindow] {
+        var refreshed: [MenuBarItemWindow] = []
+        for attempt in 0..<repositionPollLimit {
+            try Task.checkCancellation()
+            let refreshedByID = Dictionary(
+                try windowLister.listMenuBarItemWindows().map { ($0.windowID, $0) },
+                uniquingKeysWith: { _, latest in latest }
+            )
+            // 再列挙から消えたウィンドウは stale frame へフォールバックしない。
+            refreshed = targets.compactMap { refreshedByID[$0.windowID] }
+            if refreshed.allSatisfy(capturePositioner.isReadyForCapture) {
+                return refreshed
+            }
+            if attempt + 1 < repositionPollLimit {
+                try await Task.sleep(for: repositionPollInterval)
+            }
+        }
+        // タイムアウト時も、準備できた項目は部分成功として撮像する。
+        return refreshed.filter(capturePositioner.isReadyForCapture)
     }
 
     private func hiddenWindows(
@@ -142,22 +204,14 @@ public final class MenuBarItemImager {
         mainDividerWindowID: CGWindowID,
         subDividerWindowID: CGWindowID?
     ) throws -> [MenuBarItemWindow] {
-        guard let mainDivider = windows.first(where: { $0.windowID == mainDividerWindowID })
-        else {
-            throw MenuBarItemImagingError.dividerWindowNotFound(
-                windowID: mainDividerWindowID
-            )
-        }
+        let mainDivider = try divider(
+            windowID: mainDividerWindowID,
+            in: windows
+        )
 
         let subDivider: MenuBarItemWindow?
         if let subDividerWindowID {
-            guard let found = windows.first(where: { $0.windowID == subDividerWindowID })
-            else {
-                throw MenuBarItemImagingError.dividerWindowNotFound(
-                    windowID: subDividerWindowID
-                )
-            }
-            subDivider = found
+            subDivider = try divider(windowID: subDividerWindowID, in: windows)
         } else {
             subDivider = nil
         }
@@ -173,6 +227,7 @@ public final class MenuBarItemImager {
                       // NSScreen と異なるため、ここでは列挙結果同士だけを比較する。
                       window.frame.maxY > mainDivider.frame.minY,
                       window.frame.minY < mainDivider.frame.maxY,
+                      belongsToSameDisplay(window, as: mainDivider),
                       window.frame.maxX <= mainDivider.frame.minX
                 else { return false }
                 return subDivider.map { window.frame.minX >= $0.frame.maxX } ?? true
@@ -185,23 +240,46 @@ public final class MenuBarItemImager {
             }
     }
 
+    private func divider(
+        windowID: CGWindowID,
+        in windows: [MenuBarItemWindow]
+    ) throws -> MenuBarItemWindow {
+        guard let divider = windows.first(where: { $0.windowID == windowID }) else {
+            throw MenuBarItemImagingError.dividerWindowNotFound(windowID: windowID)
+        }
+        return divider
+    }
+
+    private func belongsToSameDisplay(
+        _ window: MenuBarItemWindow,
+        as divider: MenuBarItemWindow
+    ) -> Bool {
+        guard let dividerDisplay = divider.displayFrame else {
+            // 所属情報がない実装では、従来どおり同一メニューバー行で判定する。
+            return true
+        }
+        // どの画面とも交差しない項目は divider の拡大で画面外へ押し出された
+        // 対象なので含める。別画面に属すると判明した項目だけを除外する。
+        return window.displayFrame.map { $0 == dividerDisplay } ?? true
+    }
+
     private func capture(
         _ windows: [MenuBarItemWindow]
     ) async throws -> [ImagedMenuBarItem] {
+        let imagesByID = try await imageCapturer.capture(
+            windowIDs: windows.map(\.windowID)
+        )
         var results: [ImagedMenuBarItem] = []
         results.reserveCapacity(windows.count)
-        for (order, window) in windows.enumerated() {
-            let image = try await imageCapturer.capture(windowID: window.windowID)
+        for window in windows {
+            guard let image = imagesByID[window.windowID] else { continue }
             results.append(
                 ImagedMenuBarItem(
                     windowID: window.windowID,
                     image: image,
                     frame: window.frame,
-                    owner: MenuBarItemOwner(
-                        processIdentifier: window.ownerPID,
-                        name: window.ownerName
-                    ),
-                    order: order
+                    owner: window.owner,
+                    order: results.count
                 )
             )
         }

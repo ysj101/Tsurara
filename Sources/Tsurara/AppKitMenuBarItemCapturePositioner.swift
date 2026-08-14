@@ -4,46 +4,48 @@ import TsuraraCore
 /// length で画面外へ押し出された項目を、撮像中だけ表示可能な位置へ戻す。
 @MainActor
 final class AppKitMenuBarItemCapturePositioner: MenuBarItemCapturePositioning {
-    private let dividerItem: any StatusItem
-    private let expandedLength: CGFloat
-    private var lengthToRestore: CGFloat?
+    private let sectionManager: SectionManager
+    private let screenFrames: () -> [CGRect]
+    private var ownsCaptureExpansion = false
 
     init(
-        dividerItem: any StatusItem,
-        expandedLength: CGFloat = StatusItemLength.square
+        sectionManager: SectionManager,
+        screenFrames: (() -> [CGRect])? = nil
     ) {
-        self.dividerItem = dividerItem
-        self.expandedLength = expandedLength
+        self.sectionManager = sectionManager
+        self.screenFrames = screenFrames ?? Self.cgScreenFrames
     }
 
-    func prepareForCapture(of windows: [MenuBarItemWindow]) async -> Bool {
-        let screenHorizontalRanges = NSScreen.screens.map {
-            $0.frame.minX..<$0.frame.maxX
-        }
-        let containsOffscreenWindow = windows.contains { window in
-            !screenHorizontalRanges.contains { range in
-                window.frame.maxX > range.lowerBound
-                    && window.frame.minX < range.upperBound
-            }
-        }
-        guard containsOffscreenWindow, dividerItem.length != expandedLength else {
-            return false
-        }
+    func prepareForCapture(of windows: [MenuBarItemWindow]) -> Bool {
+        guard windows.contains(where: { !isVisibleOnMenuBar($0) }) else { return false }
+        ownsCaptureExpansion = sectionManager.beginCaptureExpansion()
+        return ownsCaptureExpansion
+    }
 
-        lengthToRestore = dividerItem.length
-        dividerItem.length = expandedLength
-
-        // NSStatusItem.length の変更は WindowServer に非同期で反映される。直後の
-        // CGWindowList/ScreenCaptureKit は古い負座標を返すことがあるため、短時間だけ
-        // RunLoop を譲り、呼び出し側に再列挙させる。固定待機は撮像時だけで、通常の
-        // collapse/expand 操作には影響しない。
-        try? await Task.sleep(for: .milliseconds(100))
-        return true
+    func isReadyForCapture(_ window: MenuBarItemWindow) -> Bool {
+        isVisibleOnMenuBar(window)
     }
 
     func restoreAfterCapture() {
-        guard let lengthToRestore else { return }
-        dividerItem.length = lengthToRestore
-        self.lengthToRestore = nil
+        guard ownsCaptureExpansion else { return }
+        sectionManager.endCaptureExpansion()
+        ownsCaptureExpansion = false
+    }
+
+    private func isVisibleOnMenuBar(_ window: MenuBarItemWindow) -> Bool {
+        window.isVisibleOnMenuBar(displayFrames: screenFrames())
+    }
+
+    /// NSScreen は左下原点、CGWindow は主画面左上原点なので y を反転する。
+    private static func cgScreenFrames() -> [CGRect] {
+        guard let primaryMaxY = NSScreen.screens.first?.frame.maxY else { return [] }
+        return NSScreen.screens.map { screen in
+            CGRect(
+                x: screen.frame.minX,
+                y: primaryMaxY - screen.frame.maxY,
+                width: screen.frame.width,
+                height: screen.frame.height
+            )
+        }
     }
 }

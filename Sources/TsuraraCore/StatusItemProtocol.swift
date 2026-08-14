@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// NSStatusItem の length に渡す AppKit の番兵値（NSStatusItem.variableLength /
@@ -9,6 +10,8 @@ public enum StatusItemLength {
 
 @MainActor
 public protocol StatusItem: AnyObject {
+    /// CGWindowList / ScreenCaptureKit で対応するウィンドウを解決する ID。
+    var windowID: CGWindowID? { get }
     var length: CGFloat { get set }
     var isVisible: Bool { get set }
     /// クリック時に呼ばれる。実装がメニューを併設している場合は発火しないことがある

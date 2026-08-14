@@ -53,6 +53,8 @@ public final class SectionManager {
     private let rehideTimer: any RehideTimerScheduling
     private var isRehideScheduled = false
     private var isRehideDeferred = false
+    /// 撮像中は区切りを展開したままにし、トグルの最終状態だけをここへ合流する。
+    private var captureDesiredCollapsedState: Bool?
 
     // サブ区切りの実行時の有効化/無効化で区切りを追加生成するために保持する。
     private let statusItemFactory: (String) -> any StatusItem
@@ -119,12 +121,48 @@ public final class SectionManager {
     }
 
     public func toggleHiddenSection() {
+        if let desiredCollapsed = captureDesiredCollapsedState {
+            captureDesiredCollapsedState = !desiredCollapsed
+            return
+        }
         if isHiddenSectionCollapsed {
             setHiddenSectionCollapsed(false)
             scheduleRehideIfEnabled()
         } else {
             cancelPendingRehide()
             setHiddenSectionCollapsed(true)
+        }
+    }
+
+    /// 画面外の項目を撮像する間だけ非表示セクションを強制展開する。
+    /// 同じ length でも一度 collapse を経由させ、過密配置で自然に画面外へ
+    /// 押し出された項目を WindowServer に再配置させる。
+    @discardableResult
+    public func beginCaptureExpansion() -> Bool {
+        guard captureDesiredCollapsedState == nil,
+              let dividerItem = hiddenSection.dividerItem
+        else { return false }
+
+        captureDesiredCollapsedState = isHiddenSectionCollapsed
+        dividerItem.length = Self.hiddenSectionCollapsedLength
+        dividerItem.length = hiddenSectionExpandedLength
+        hiddenSection.isVisible = true
+        toggleItem.setIcon(
+            symbolName: Self.toggleExpandedSymbolName,
+            accessibilityDescription: Self.toggleItemAccessibilityDescription
+        )
+        return true
+    }
+
+    /// 撮像開始時の状態と撮像中のトグル操作を合流した最終状態を反映する。
+    public func endCaptureExpansion() {
+        guard let desiredCollapsed = captureDesiredCollapsedState else { return }
+        captureDesiredCollapsedState = nil
+        setHiddenSectionCollapsed(desiredCollapsed)
+        if desiredCollapsed {
+            cancelPendingRehide()
+        } else if !isRehideScheduled {
+            scheduleRehideIfEnabled()
         }
     }
 
@@ -226,6 +264,11 @@ public final class SectionManager {
 
         // スケジュール後に設定が無効化されたケースを発火時点で尊重する。
         guard settings.autoRehideEnabled else { return }
+
+        if captureDesiredCollapsedState != nil {
+            captureDesiredCollapsedState = true
+            return
+        }
 
         if isMenuTrackingActive {
             isRehideDeferred = true

@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import TsuraraCore
@@ -12,10 +13,11 @@ final class CGWindowMenuBarItemWindowLister: MenuBarItemWindowListing {
             [.optionAll, .excludeDesktopElements],
             kCGNullWindowID
         ) as? [[String: Any]] else {
-            return []
+            throw MenuBarItemWindowListingError.windowListUnavailable
         }
 
         let statusLevel = CGWindowLevelForKey(.statusWindow)
+        let displays = Self.cgScreenFrames()
         return dictionaries.compactMap { dictionary in
             guard
                 let layer = (dictionary[kCGWindowLayer as String] as? NSNumber)?.int32Value,
@@ -28,21 +30,30 @@ final class CGWindowMenuBarItemWindowLister: MenuBarItemWindowListing {
                 frame.height > 0
             else { return nil }
 
+            let displayFrame = displays.first { frame.intersects($0) }
+
             return MenuBarItemWindow(
                 windowID: windowID,
                 frame: frame,
-                ownerPID: ownerPID,
-                ownerName: dictionary[kCGWindowOwnerName as String] as? String ?? ""
+                owner: MenuBarItemOwner(
+                    processIdentifier: ownerPID,
+                    name: dictionary[kCGWindowOwnerName as String] as? String ?? ""
+                ),
+                displayFrame: displayFrame
             )
         }
-        .sorted {
-            if $0.frame.minY != $1.frame.minY {
-                return $0.frame.minY < $1.frame.minY
-            }
-            if $0.frame.minX != $1.frame.minX {
-                return $0.frame.minX < $1.frame.minX
-            }
-            return $0.windowID < $1.windowID
+    }
+
+    /// NSScreen の左下原点から CGWindow の主画面左上原点へ変換する。
+    private static func cgScreenFrames() -> [CGRect] {
+        guard let primaryMaxY = NSScreen.screens.first?.frame.maxY else { return [] }
+        return NSScreen.screens.map { screen in
+            CGRect(
+                x: screen.frame.minX,
+                y: primaryMaxY - screen.frame.maxY,
+                width: screen.frame.width,
+                height: screen.frame.height
+            )
         }
     }
 }
