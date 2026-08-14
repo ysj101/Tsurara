@@ -1,37 +1,28 @@
 import CoreGraphics
-import Foundation
 import TsuraraCore
 
-/// CoreGraphics の画面収録権限 API を使う具象実装。
-///
-/// CGPreflightScreenCaptureAccess は「未決定」と「拒否」を区別しないため、
-/// リクエスト実行済みかだけを UserDefaults に保存して状態を補完する。
+/// Core の権限管理へ CoreGraphics API を注入するアプリ用アダプター。
 @MainActor
 final class CoreGraphicsScreenCapturePermissionManager:
     ScreenCapturePermissionManaging
 {
-    private enum Key {
-        static let hasRequestedAccess = "screenCapturePermission.hasRequestedAccess"
-    }
+    static let shared = CoreGraphicsScreenCapturePermissionManager()
 
-    private let defaults: UserDefaults
+    private let manager: ScreenCapturePermissionManager
 
-    init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
+    init(settings: SettingsStore = SettingsStore()) {
+        manager = ScreenCapturePermissionManager(
+            settings: settings,
+            preflightAccess: { CGPreflightScreenCaptureAccess() },
+            requestAccess: { CGRequestScreenCaptureAccess() }
+        )
     }
 
     var status: ScreenCapturePermissionStatus {
-        if CGPreflightScreenCaptureAccess() {
-            return .authorized
-        }
-        return defaults.bool(forKey: Key.hasRequestedAccess)
-            ? .denied
-            : .notDetermined
+        manager.status
     }
 
-    func requestAccess() -> Bool {
-        // API 呼び出し前に記録し、ダイアログ表示中の終了後も再要求しない。
-        defaults.set(true, forKey: Key.hasRequestedAccess)
-        return CGRequestScreenCaptureAccess()
+    func requestAccess() -> ScreenCapturePermissionRequestResult {
+        manager.requestAccess()
     }
 }

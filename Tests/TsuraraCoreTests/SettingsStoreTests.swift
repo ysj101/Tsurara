@@ -30,6 +30,7 @@ func settingsStoreUsesExpectedDefaults() {
         #expect(store.autoRehideEnabled == true)
         #expect(store.autoRehideSeconds == SettingsStore.defaultAutoRehideSeconds)
         #expect(store.toggleHotkey == nil)
+        #expect(store.hasRequestedScreenCaptureAccess == false)
     }
 }
 
@@ -44,6 +45,7 @@ func settingsStoreRoundTripsEveryProperty() {
         store.autoRehideEnabled = false
         store.autoRehideSeconds = 30
         store.toggleHotkey = hotkey
+        store.hasRequestedScreenCaptureAccess = true
 
         let reloadedStore = SettingsStore(defaults: defaults)
         #expect(reloadedStore.launchAtLogin == true)
@@ -51,9 +53,27 @@ func settingsStoreRoundTripsEveryProperty() {
         #expect(reloadedStore.autoRehideEnabled == false)
         #expect(reloadedStore.autoRehideSeconds == 30)
         #expect(reloadedStore.toggleHotkey == hotkey)
+        #expect(reloadedStore.hasRequestedScreenCaptureAccess == true)
 
         reloadedStore.toggleHotkey = nil
+        reloadedStore.hasRequestedScreenCaptureAccess = false
         #expect(SettingsStore(defaults: defaults).toggleHotkey == nil)
+        #expect(SettingsStore(defaults: defaults).hasRequestedScreenCaptureAccess == false)
+    }
+}
+
+@Test
+func screenCaptureRequestFlagUsesReverseDNSKey() {
+    withIsolatedDefaults { defaults in
+        let store = SettingsStore(defaults: defaults)
+
+        store.hasRequestedScreenCaptureAccess = true
+
+        #expect(
+            defaults.bool(
+                forKey: "com.ysj.Tsurara.hasRequestedScreenCaptureAccess"
+            )
+        )
     }
 }
 

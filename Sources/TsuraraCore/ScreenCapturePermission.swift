@@ -2,51 +2,67 @@
 public enum ScreenCapturePermissionStatus: Equatable, Sendable {
     case authorized
     case notDetermined
-    case denied
+    /// リクエストを以前提示したが、現在の preflight では許可を確認できない。
+    /// プロンプトへの回答待ち、拒否、TCC リセット後のいずれも含み得る。
+    case requestPreviouslyPresented
 }
 
-/// OS の画面収録権限 API を Core のフロー制御から分離する。
+/// システムへの権限リクエスト直後に判断できる結果。
+public enum ScreenCapturePermissionRequestResult: Equatable, Sendable {
+    case authorized
+    /// CoreGraphics の API は初回プロンプトへの回答を待たず false を返すため、
+    /// false を拒否とは断定せず、後で状態を再確認する。
+    case decisionPending
+}
+
+/// OS の画面収録権限 API を利用側から分離する。
 @MainActor
 public protocol ScreenCapturePermissionManaging: AnyObject {
     var status: ScreenCapturePermissionStatus { get }
 
-    /// システムの権限リクエストを表示し、許可された場合に true を返す。
+    /// システムの権限リクエストを表示する。
     @discardableResult
-    func requestAccess() -> Bool
+    func requestAccess() -> ScreenCapturePermissionRequestResult
 }
 
-/// サブバー利用要求に対して UI 層が行うべき処理。
-public enum ScreenCapturePermissionAction: Equatable, Sendable {
-    case openSubBar
-    case showOnboarding
-    case showDeniedFallback
-}
-
-/// サブバーだけを権限でガードするフロー。
+/// preflight とリクエスト API を注入可能にし、画面収録権限の状態を導出する。
 ///
-/// SectionManager の length 押し出しには関与しないため、権限がない場合も
-/// 非表示機能は継続する。UI 層はサブバーを開く直前にこの型へ問い合わせる。
+/// CoreGraphics の preflight は未決定と拒否を区別しない。したがって永続フラグは
+/// 「提示済み」を表すだけであり、それ単独で拒否済みとは判定しない。
 @MainActor
-public struct ScreenCapturePermissionFlow {
-    private let permission: any ScreenCapturePermissionManaging
+public final class ScreenCapturePermissionManager: ScreenCapturePermissionManaging {
+    private let settings: SettingsStore
+    private let preflightAccess: () -> Bool
+    private let requestSystemAccess: () -> Bool
 
-    public init(permission: any ScreenCapturePermissionManaging) {
-        self.permission = permission
+    public init(
+        settings: SettingsStore,
+        preflightAccess: @escaping () -> Bool,
+        requestAccess: @escaping () -> Bool
+    ) {
+        self.settings = settings
+        self.preflightAccess = preflightAccess
+        requestSystemAccess = requestAccess
     }
 
-    public func actionForSubBarRequest() -> ScreenCapturePermissionAction {
-        switch permission.status {
-        case .authorized:
-            return .openSubBar
-        case .notDetermined:
-            return .showOnboarding
-        case .denied:
-            return .showDeniedFallback
+    public var status: ScreenCapturePermissionStatus {
+        if preflightAccess() {
+            // 実状態を常に優先し、古い提示済みフラグとの乖離を解消する。
+            settings.hasRequestedScreenCaptureAccess = false
+            return .authorized
         }
+        return settings.hasRequestedScreenCaptureAccess
+            ? .requestPreviouslyPresented
+            : .notDetermined
     }
 
-    /// アプリ内の説明を利用者が確認した後にだけ呼び出す。
-    public func requestAccessAfterOnboarding() -> ScreenCapturePermissionAction {
-        permission.requestAccess() ? .openSubBar : .showDeniedFallback
+    public func requestAccess() -> ScreenCapturePermissionRequestResult {
+        // API が初回プロンプト表示時に即座に false を返しても、次回起動・操作時に
+        // 再確認できるよう、呼び出し前に提示済みとして記録する。
+        settings.hasRequestedScreenCaptureAccess = true
+        guard requestSystemAccess() else { return .decisionPending }
+
+        settings.hasRequestedScreenCaptureAccess = false
+        return .authorized
     }
 }

@@ -5,8 +5,17 @@ import TsuraraCore
 /// ScreenCaptureKit の desktop-independent window capture を使う撮像実装。
 @MainActor
 final class ScreenCaptureKitMenuBarItemImageCapturer: MenuBarItemImageCapturing {
+    private let permission: any ScreenCapturePermissionManaging
+
+    init(
+        permission: any ScreenCapturePermissionManaging =
+            CoreGraphicsScreenCapturePermissionManager.shared
+    ) {
+        self.permission = permission
+    }
+
     func verifyScreenRecordingPermission() throws {
-        guard CGPreflightScreenCaptureAccess() else {
+        guard permission.status == .authorized else {
             throw MenuBarItemImagingError.screenRecordingPermissionDenied
         }
     }

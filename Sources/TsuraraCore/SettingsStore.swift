@@ -22,6 +22,8 @@ public final class SettingsStore: @unchecked Sendable {
         case autoRehideEnabled = "com.ysj.Tsurara.autoRehideEnabled"
         case autoRehideSeconds = "com.ysj.Tsurara.autoRehideSeconds"
         case toggleHotkey = "com.ysj.Tsurara.toggleHotkey"
+        case hasRequestedScreenCaptureAccess =
+            "com.ysj.Tsurara.hasRequestedScreenCaptureAccess"
     }
 
     private let defaults: UserDefaults
@@ -72,6 +74,22 @@ public final class SettingsStore: @unchecked Sendable {
                 return
             }
             defaults.set(data, forKey: Key.toggleHotkey.rawValue)
+        }
+    }
+
+    /// CoreGraphics が未決定と拒否を区別できないため、システムの権限
+    /// リクエストを提示した事実だけを保持する。拒否済みの断定には使わない。
+    public var hasRequestedScreenCaptureAccess: Bool {
+        get {
+            defaults.object(forKey: Key.hasRequestedScreenCaptureAccess.rawValue)
+                as? Bool ?? false
+        }
+        set {
+            if newValue {
+                defaults.set(true, forKey: Key.hasRequestedScreenCaptureAccess.rawValue)
+            } else {
+                defaults.removeObject(forKey: Key.hasRequestedScreenCaptureAccess.rawValue)
+            }
         }
     }
 
