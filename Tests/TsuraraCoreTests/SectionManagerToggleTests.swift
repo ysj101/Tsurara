@@ -172,4 +172,48 @@ struct SectionManagerToggleTests {
         #expect(secondaryDivider.lengthHistory == lengthHistoryAtLaunch)
         #expect(manager.alwaysHiddenSection.isVisible == false)
     }
+
+    @Test
+    func toggleDuringCaptureExpansionIsMergedOnRestore() {
+        let initialLength: CGFloat = 42
+        let toggleItem = MockStatusItem(length: StatusItemLength.square)
+        let mainDivider = MockStatusItem(windowID: 31, length: initialLength)
+        var items = [toggleItem, mainDivider]
+        let manager = SectionManager(settings: makeToggleSettings()) { _ in
+            items.removeFirst()
+        }
+
+        #expect(manager.beginCaptureExpansion())
+        // 撮像中は実際の UI を展開したままにし、ユーザー操作を最終状態へ合流する。
+        toggleItem.fireClick()
+        #expect(manager.hiddenSection.isVisible)
+        #expect(mainDivider.length == initialLength)
+
+        manager.endCaptureExpansion()
+
+        #expect(manager.isHiddenSectionCollapsed)
+        #expect(manager.hiddenSection.isVisible == false)
+        #expect(mainDivider.length == SectionManager.hiddenSectionCollapsedLength)
+        #expect(toggleItem.iconSymbolNames.last == SectionManager.toggleCollapsedSymbolName)
+    }
+
+    @Test
+    func captureExpansionPulsesDividerEvenWhenAlreadyAtExpandedLength() {
+        let toggleItem = MockStatusItem(length: StatusItemLength.square)
+        let mainDivider = MockStatusItem(length: StatusItemLength.square)
+        var items = [toggleItem, mainDivider]
+        let manager = SectionManager(settings: makeToggleSettings()) { _ in
+            items.removeFirst()
+        }
+
+        #expect(manager.beginCaptureExpansion())
+
+        #expect(mainDivider.lengthHistory == [
+            SectionManager.hiddenSectionCollapsedLength,
+            StatusItemLength.square,
+        ])
+        manager.endCaptureExpansion()
+        #expect(manager.hiddenSection.isVisible)
+        #expect(mainDivider.length == StatusItemLength.square)
+    }
 }
