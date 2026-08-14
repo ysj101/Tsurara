@@ -9,6 +9,8 @@ public enum MenuBarSectionKind: Sendable {
 @MainActor
 public final class MenuBarSection {
     public let kind: MenuBarSectionKind
+    /// `.hidden` / `.alwaysHidden` では恒常的な画面上の可視性ではなく、
+    /// SectionManager が一時展開している間だけ true になる。
     public internal(set) var isVisible: Bool
     public internal(set) var dividerItem: (any StatusItem)?
 

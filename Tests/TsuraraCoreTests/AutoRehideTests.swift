@@ -57,7 +57,11 @@ struct AutoRehideTests {
         ) { _ in
             items.removeFirst()
         }
-        manager.onSubBarToggleRequested = { manager.setSubBarOpen(false) }
+        // 本番配線と同じく、toggle は現在状態を反転し、close は閉じるだけにする。
+        manager.onSubBarToggleRequested = {
+            manager.setSubBarOpen(!manager.isSubBarOpen)
+        }
+        manager.onSubBarCloseRequested = { manager.setSubBarOpen(false) }
         return (manager, timer, divider)
     }
 
@@ -72,6 +76,28 @@ struct AutoRehideTests {
 
         timer.fire()
 
+        #expect(manager.isSubBarOpen == false)
+    }
+
+    @Test
+    func autoRehideRequestsIdempotentCloseInsteadOfToggle() {
+        let (manager, timer, _) = makeManager()
+        var toggleRequestCount = 0
+        var closeRequestCount = 0
+        manager.onSubBarToggleRequested = {
+            toggleRequestCount += 1
+            manager.setSubBarOpen(!manager.isSubBarOpen)
+        }
+        manager.onSubBarCloseRequested = {
+            closeRequestCount += 1
+            manager.setSubBarOpen(false)
+        }
+        manager.setSubBarOpen(true)
+
+        timer.fire()
+
+        #expect(toggleRequestCount == 0)
+        #expect(closeRequestCount == 1)
         #expect(manager.isSubBarOpen == false)
     }
 
@@ -143,7 +169,10 @@ struct AutoRehideTests {
             settings: settings,
             rehideTimer: timer
         ) { _ in MockStatusItem(length: StatusItemLength.square) }
-        manager.onSubBarToggleRequested = { manager.setSubBarOpen(false) }
+        manager.onSubBarToggleRequested = {
+            manager.setSubBarOpen(!manager.isSubBarOpen)
+        }
+        manager.onSubBarCloseRequested = { manager.setSubBarOpen(false) }
         manager.setSubBarOpen(true)
 
         settings.autoRehideEnabled = false

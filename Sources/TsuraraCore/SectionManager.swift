@@ -30,6 +30,8 @@ public final class SectionManager {
 
     /// アプリ層へサブバー開閉要求を通知する。
     public var onSubBarToggleRequested: (() -> Void)?
+    /// アプリ層へサブバーを閉じる冪等な要求を通知する。
+    public var onSubBarCloseRequested: (() -> Void)?
 
     /// 実際にサブバーが表示されているか。撮像中はまだ false のままとする。
     public private(set) var isSubBarOpen = false
@@ -101,7 +103,6 @@ public final class SectionManager {
             secondaryDivider = nil
         }
 
-        // isVisible は「そのセクションのアイコンが画面上に見えているか」。
         visibleSection = MenuBarSection(
             kind: .visible,
             isVisible: true,
@@ -222,6 +223,9 @@ public final class SectionManager {
             let expandedLength = alwaysHiddenSectionExpandedLength
         else { return }
 
+        if isSubBarOpen {
+            onSubBarCloseRequested?()
+        }
         hiddenSection.dividerItem?.length = hiddenSectionTemporaryDisplayLength
         hiddenSection.isVisible = true
         dividerItem.length = expandedLength
@@ -284,7 +288,7 @@ public final class SectionManager {
             return
         }
 
-        onSubBarToggleRequested?()
+        onSubBarCloseRequested?()
     }
 
     private func cancelPendingRehide() {

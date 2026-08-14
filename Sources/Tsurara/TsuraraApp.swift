@@ -38,6 +38,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         Self.sharedSectionManager = manager
         observeMenuTracking(for: manager)
+        // release ビルドで下の型チェックが失敗して早期 return しても、
+        // 設定済みホットキーの登録自体は失われないよう先に完了させる。
+        let hotkeyManager = HotkeyManager(
+            settings: settings,
+            registrar: CarbonHotkeyRegistrar(),
+            onToggle: { manager.toggleSubBar() }
+        )
+        hotkeyManager.restoreFromSettings()
+        self.hotkeyManager = hotkeyManager
+        HotkeyManager.shared = hotkeyManager
         // LSUIElement アプリはメインメニューを持たず終了手段がないため、
         // 常に画面上に残るトグル項目の右クリック時だけ終了メニューを表示する。
         let menu = NSMenu()
@@ -123,14 +133,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             coordinator?.forwardClick(on: item, button: button)
         }
         manager.onSubBarToggleRequested = { [weak coordinator] in coordinator?.toggle() }
-        let hotkeyManager = HotkeyManager(
-            settings: settings,
-            registrar: CarbonHotkeyRegistrar(),
-            onToggle: { manager.toggleSubBar() }
-        )
-        hotkeyManager.restoreFromSettings()
-        self.hotkeyManager = hotkeyManager
-        HotkeyManager.shared = hotkeyManager
+        manager.onSubBarCloseRequested = { [weak coordinator] in coordinator?.close() }
         subBarCoordinator = coordinator
         sectionManager = manager
     }
