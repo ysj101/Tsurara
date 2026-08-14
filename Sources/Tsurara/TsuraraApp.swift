@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var openMenuCount = 0
     private var hotkeyManager: HotkeyManager?
     private var settingsWindow: NSWindow?
+    private var subBarCoordinator: SubBarCoordinator?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // バンドルの LSUIElement と同じ状態を、バンドルを介さない `swift run` でも
@@ -100,6 +101,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
             }
         }
+
+        guard let mainDivider = manager.hiddenSection.dividerItem as? AppKitStatusItem else {
+            assertionFailure("メイン区切りが AppKitStatusItem ではない")
+            sectionManager = manager
+            return
+        }
+        let panel = SubBarPanel()
+        let presentationController = SubBarPresentationController(presenter: panel)
+        let coordinator = SubBarCoordinator(
+            manager: manager,
+            toggleItem: toggleItem,
+            imager: MenuBarItemImager(
+                windowLister: CGWindowMenuBarItemWindowLister(),
+                imageCapturer: ScreenCaptureKitMenuBarItemImageCapturer(),
+                capturePositioner: AppKitMenuBarItemCapturePositioner(
+                    dividerItem: mainDivider
+                )
+            ),
+            permissionController: ScreenCapturePermissionOnboardingController(),
+            presentationController: presentationController
+        )
+        panel.onDismissRequest = { [weak coordinator] in coordinator?.close() }
+        manager.onSubBarToggleRequested = { [weak coordinator] in coordinator?.toggle() }
+        subBarCoordinator = coordinator
         sectionManager = manager
     }
 }
