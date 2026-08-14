@@ -44,7 +44,9 @@ final class SubBarCoordinator {
                 self?.startCapture(generation: generation)
             }
             if !didPermitOpening {
-                presentationController.close(generation: generation)
+                if presentationController.close(generation: generation) {
+                    manager.setSubBarOpen(false)
+                }
             }
         case .close:
             closeSubBar()
@@ -60,6 +62,7 @@ final class SubBarCoordinator {
         captureTask = nil
         forwardingTask?.cancel()
         presentationController.close()
+        manager.setSubBarOpen(false)
     }
 
     func forwardClick(
@@ -113,7 +116,9 @@ final class SubBarCoordinator {
                     let mainDivider = manager.hiddenSection.dividerItem as? AppKitStatusItem,
                     let mainDividerWindowID = mainDivider.windowID
                 else {
-                    presentationController.close(generation: generation)
+                    if presentationController.close(generation: generation) {
+                        manager.setSubBarOpen(false)
+                    }
                     return
                 }
                 let subDividerWindowID =
@@ -125,19 +130,23 @@ final class SubBarCoordinator {
                 guard !Task.isCancelled else { return }
                 guard presentationController.ownsCycle(generation) else { return }
 
-                presentationController.open(
+                let didOpen = presentationController.open(
                     items: items,
                     generation: generation,
                     anchorFrame: { [weak toggleItem] in toggleItem?.screenFrame }
                 )
+                manager.setSubBarOpen(didOpen)
             } catch is CancellationError {
                 guard !Task.isCancelled else { return }
-                presentationController.close(generation: generation)
+                if presentationController.close(generation: generation) {
+                    manager.setSubBarOpen(false)
+                }
             } catch {
                 guard !Task.isCancelled,
                       presentationController.ownsCycle(generation)
                 else { return }
                 presentationController.close(generation: generation)
+                manager.setSubBarOpen(false)
                 showCaptureFailure(error)
             }
         }

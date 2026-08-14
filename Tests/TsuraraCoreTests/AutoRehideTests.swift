@@ -57,51 +57,47 @@ struct AutoRehideTests {
         ) { _ in
             items.removeFirst()
         }
+        manager.onSubBarToggleRequested = { manager.setSubBarOpen(false) }
         return (manager, timer, divider)
     }
 
     @Test
-    func shownSectionIsAutomaticallyRehiddenAfterConfiguredDelay() {
+    func openSubBarIsAutomaticallyClosedAfterConfiguredDelay() {
         let (manager, timer, _) = makeManager(autoRehideSeconds: 20)
-        manager.toggleHiddenSection()
 
-        manager.toggleHiddenSection()
+        manager.setSubBarOpen(true)
 
-        #expect(manager.isHiddenSectionCollapsed == false)
+        #expect(manager.isSubBarOpen)
         #expect(timer.scheduledDelays == [20])
 
         timer.fire()
 
-        #expect(manager.isHiddenSectionCollapsed)
-        #expect(manager.hiddenSection.isVisible == false)
+        #expect(manager.isSubBarOpen == false)
     }
 
     @Test
-    func disabledAutoRehideDoesNotScheduleOrCollapse() {
+    func disabledAutoRehideDoesNotScheduleOrClose() {
         let (manager, timer, _) = makeManager(autoRehideEnabled: false)
-        manager.toggleHiddenSection()
 
-        manager.toggleHiddenSection()
+        manager.setSubBarOpen(true)
 
         #expect(timer.scheduledDelays.isEmpty)
         #expect(timer.isScheduled == false)
 
         timer.fire()
 
-        #expect(manager.isHiddenSectionCollapsed == false)
-        #expect(manager.hiddenSection.isVisible)
+        #expect(manager.isSubBarOpen)
     }
 
     @Test
-    func menuTrackingDefersRehideUntilTrackingEndsAndTimerFiresAgain() {
+    func menuTrackingDefersCloseUntilTrackingEndsAndTimerFiresAgain() {
         let (manager, timer, _) = makeManager(autoRehideSeconds: 10)
-        manager.toggleHiddenSection()
-        manager.toggleHiddenSection()
+        manager.setSubBarOpen(true)
         manager.isMenuTrackingActive = true
 
         timer.fire()
 
-        #expect(manager.isHiddenSectionCollapsed == false)
+        #expect(manager.isSubBarOpen)
         #expect(timer.isScheduled == false)
 
         manager.isMenuTrackingActive = false
@@ -111,32 +107,30 @@ struct AutoRehideTests {
 
         timer.fire()
 
-        #expect(manager.isHiddenSectionCollapsed)
+        #expect(manager.isSubBarOpen == false)
     }
 
     @Test
-    func manualRehideCancelsPendingTimerWithoutLaterSideEffects() {
+    func manualCloseCancelsPendingTimerWithoutLaterSideEffects() {
         let (manager, timer, divider) = makeManager()
-        manager.toggleHiddenSection()
-        manager.toggleHiddenSection()
+        manager.setSubBarOpen(true)
         #expect(timer.isScheduled)
 
-        manager.toggleHiddenSection()
+        manager.setSubBarOpen(false)
 
-        #expect(manager.isHiddenSectionCollapsed)
         #expect(timer.cancelCount == 1)
         #expect(timer.isScheduled == false)
-        let lengthHistoryAfterManualRehide = divider.lengthHistory
+        let lengthHistoryAfterManualClose = divider.lengthHistory
 
         timer.fire()
 
-        #expect(manager.isHiddenSectionCollapsed)
+        #expect(manager.isSubBarOpen == false)
         #expect(timer.cancelCount == 1)
-        #expect(divider.lengthHistory == lengthHistoryAfterManualRehide)
+        #expect(divider.lengthHistory == lengthHistoryAfterManualClose)
     }
 
     @Test
-    func disablingWhileTimerInFlightPreventsRehide() {
+    func disablingWhileTimerInFlightPreventsClose() {
         let defaults = UserDefaults(suiteName: autoRehideSuiteName)!
         defaults.removePersistentDomain(forName: autoRehideSuiteName)
         defer { defaults.removePersistentDomain(forName: autoRehideSuiteName) }
@@ -149,14 +143,12 @@ struct AutoRehideTests {
             settings: settings,
             rehideTimer: timer
         ) { _ in MockStatusItem(length: StatusItemLength.square) }
+        manager.onSubBarToggleRequested = { manager.setSubBarOpen(false) }
+        manager.setSubBarOpen(true)
 
-        manager.toggleHiddenSection()  // collapse
-        manager.toggleHiddenSection()  // expand → schedule
-
-        // 発火前に設定を無効化したら、発火しても再非表示しない。
         settings.autoRehideEnabled = false
         timer.fire()
 
-        #expect(manager.isHiddenSectionCollapsed == false)
+        #expect(manager.isSubBarOpen)
     }
 }

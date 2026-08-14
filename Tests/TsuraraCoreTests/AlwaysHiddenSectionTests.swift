@@ -39,7 +39,7 @@ struct AlwaysHiddenSectionTests {
     }
 
     @Test
-    func togglingHiddenSectionLeavesSubDividerCollapsed() {
+    func togglingSubBarLeavesSubDividerCollapsed() {
         withAlwaysHiddenSettings(enabled: true) { settings in
             let toggleItem = MockStatusItem(length: StatusItemLength.square)
             let mainDivider = MockStatusItem(length: StatusItemLength.square)
@@ -50,8 +50,8 @@ struct AlwaysHiddenSectionTests {
             }
             let historyAtLaunch = subDivider.lengthHistory
 
-            manager.toggleHiddenSection()
-            manager.toggleHiddenSection()
+            manager.toggleSubBar()
+            manager.toggleSubBar()
 
             #expect(subDivider.length == SectionManager.hiddenSectionCollapsedLength)
             #expect(subDivider.lengthHistory == historyAtLaunch)
@@ -123,7 +123,27 @@ struct AlwaysHiddenSectionTests {
     }
 
     @Test
-    func collapsingHiddenSectionRehidesTemporarilyShownSection() {
+    func disablingTemporarilyShownSectionRecollapsesMainDivider() {
+        withAlwaysHiddenSettings(enabled: true) { settings in
+            let toggleItem = MockStatusItem(length: StatusItemLength.square)
+            let mainDivider = MockStatusItem(length: 31)
+            let subDivider = MockStatusItem(length: 37)
+            var dividers = [toggleItem, mainDivider, subDivider]
+            let manager = SectionManager(settings: settings) { _ in
+                dividers.removeFirst()
+            }
+            manager.temporarilyShowAlwaysHiddenSection()
+
+            manager.setAlwaysHiddenSectionEnabled(false)
+
+            #expect(manager.hiddenSection.isVisible == false)
+            #expect(mainDivider.length == SectionManager.hiddenSectionCollapsedLength)
+            #expect(subDivider.isRemoved)
+        }
+    }
+
+    @Test
+    func togglingSubBarRehidesTemporarilyShownSection() {
         withAlwaysHiddenSettings(enabled: true) { settings in
             let toggleItem = MockStatusItem(length: StatusItemLength.square)
             let mainDivider = MockStatusItem(length: StatusItemLength.square)
@@ -136,11 +156,13 @@ struct AlwaysHiddenSectionTests {
             manager.temporarilyShowAlwaysHiddenSection()
             #expect(manager.alwaysHiddenSection.isVisible)
 
-            // 非表示セクションを畳むと、一時表示中の常時非表示セクションも畳まれる。
-            manager.toggleHiddenSection()
+            // サブバー操作に戻ると、一時表示中の常時非表示セクションも畳まれる。
+            manager.toggleSubBar()
 
             #expect(manager.alwaysHiddenSection.isVisible == false)
             #expect(subDivider.length == SectionManager.hiddenSectionCollapsedLength)
+            #expect(manager.hiddenSection.isVisible == false)
+            #expect(mainDivider.length == SectionManager.hiddenSectionCollapsedLength)
         }
     }
 

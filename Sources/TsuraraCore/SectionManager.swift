@@ -2,10 +2,9 @@ import Foundation
 
 @MainActor
 public final class SectionManager {
-    /// トグル項目の状態アイコン。非表示中は「つらら」を模した snowflake。
-    /// トグルアイテムの状態アイコン（非表示中は「つらら」を模した snowflake）。
-    public static let toggleCollapsedSymbolName = "snowflake"
-    public static let toggleExpandedSymbolName = "circle.dotted"
+    /// トグル項目の状態アイコン。閉時は「つらら」を模した snowflake。
+    public static let toggleClosedSymbolName = "snowflake"
+    public static let toggleOpenSymbolName = "circle.dotted"
     /// メイン区切り（伸びるセパレータ）の固定アイコン。
     public static let mainDividerSymbolName = "poweron"
     public static let subDividerSymbolName = "diamond"
@@ -20,7 +19,7 @@ public final class SectionManager {
     /// 実機での適切な値の調整は #6 で行う。
     public static let hiddenSectionCollapsedLength: CGFloat = 10_000
 
-    private static let toggleItemAccessibilityDescription = "Tsurara 非表示セクションの切り替え"
+    private static let toggleItemAccessibilityDescription = "Tsurara サブバーの切り替え"
     private static let mainDividerAccessibilityDescription = "Tsurara 非表示セクションの境界"
     private static let subDividerAccessibilityDescription = "Tsurara 常時非表示セクションの境界"
 
@@ -29,13 +28,11 @@ public final class SectionManager {
     public let alwaysHiddenSection: MenuBarSection
     public let toggleItem: any StatusItem
 
-    /// 既存の length トグルに加えて、アプリ層へサブバー開閉要求を通知する。
-    /// nil の場合は従来どおり非表示セクションのトグルだけを行う。
+    /// アプリ層へサブバー開閉要求を通知する。
     public var onSubBarToggleRequested: (() -> Void)?
 
-    /// 非表示セクションが畳まれているか。hiddenSection.isVisible を単一の情報源とする
-    /// （二重管理にすると自動再非表示などの経路で不整合が起きるため）。
-    public var isHiddenSectionCollapsed: Bool { !hiddenSection.isVisible }
+    /// 実際にサブバーが表示されているか。撮像中はまだ false のままとする。
+    public private(set) var isSubBarOpen = false
 
     /// いずれかのメニューが開いている間 true。true の間に自動再非表示の時刻が来た場合は
     /// 保留し、false へ戻ったときに再スケジュールする（メニュー検知はアプリ層の責務）。
@@ -49,16 +46,14 @@ public final class SectionManager {
         }
     }
 
-    // 展開時に復元する length。init 時点の値（AppKit では squareLength 番兵）を捕捉する。
-    // 区切りの length を後から変える場合はこの値も更新すること。
-    private let hiddenSectionExpandedLength: CGFloat
+    // 常時非表示セクションの一時表示時だけ復元する length。
+    // init 時点の値（AppKit では squareLength 番兵）を捕捉する。
+    private let hiddenSectionTemporaryDisplayLength: CGFloat
     private var alwaysHiddenSectionExpandedLength: CGFloat?
     private let settings: SettingsStore
     private let rehideTimer: any RehideTimerScheduling
     private var isRehideScheduled = false
     private var isRehideDeferred = false
-    /// 撮像中は区切りを展開したままにし、トグルの最終状態だけをここへ合流する。
-    private var captureDesiredCollapsedState: Bool?
     /// 撮像とクリック転送が同じ一時展開を共有できるよう、所有者数を保持する。
     private var captureExpansionDepth = 0
 
@@ -80,7 +75,7 @@ public final class SectionManager {
         // トグルは長さを変えないため、メイン区切りの拡大中も画面上に残る。
         let toggleItem = statusItemFactory(Self.toggleItemIdentifier)
         toggleItem.setIcon(
-            symbolName: Self.toggleExpandedSymbolName,
+            symbolName: Self.toggleClosedSymbolName,
             accessibilityDescription: Self.toggleItemAccessibilityDescription
         )
         self.toggleItem = toggleItem
@@ -90,7 +85,9 @@ public final class SectionManager {
             symbolName: Self.mainDividerSymbolName,
             accessibilityDescription: Self.mainDividerAccessibilityDescription
         )
-        hiddenSectionExpandedLength = mainDivider.length
+        hiddenSectionTemporaryDisplayLength = mainDivider.length
+        // 非表示アイコンはサブバーから利用するため、メニューバー内では常に隠す。
+        mainDivider.length = Self.hiddenSectionCollapsedLength
 
         let secondaryDivider: (any StatusItem)?
         if settings.alwaysHiddenSectionEnabled {
@@ -112,7 +109,7 @@ public final class SectionManager {
         )
         hiddenSection = MenuBarSection(
             kind: .hidden,
-            isVisible: true,
+            isVisible: false,
             dividerItem: mainDivider
         )
         alwaysHiddenSection = MenuBarSection(
@@ -122,23 +119,30 @@ public final class SectionManager {
         )
 
         toggleItem.onClick = { [weak self] in
-            self?.toggleHiddenSection()
+            self?.toggleSubBar()
         }
     }
 
-    public func toggleHiddenSection() {
-        if let desiredCollapsed = captureDesiredCollapsedState {
-            captureDesiredCollapsedState = !desiredCollapsed
-            return
+    public func toggleSubBar() {
+        if alwaysHiddenSection.isVisible {
+            rehideAlwaysHiddenSection()
         }
-        if isHiddenSectionCollapsed {
-            setHiddenSectionCollapsed(false)
+        onSubBarToggleRequested?()
+    }
+
+    /// アプリ層での実際の開閉結果を反映し、状態アイコンと自動クローズを同期する。
+    public func setSubBarOpen(_ open: Bool) {
+        guard isSubBarOpen != open else { return }
+        isSubBarOpen = open
+        toggleItem.setIcon(
+            symbolName: open ? Self.toggleOpenSymbolName : Self.toggleClosedSymbolName,
+            accessibilityDescription: Self.toggleItemAccessibilityDescription
+        )
+        if open {
             scheduleRehideIfEnabled()
         } else {
             cancelPendingRehide()
-            setHiddenSectionCollapsed(true)
         }
-        onSubBarToggleRequested?()
     }
 
     /// 画面外の項目を撮像する間だけ非表示セクションを強制展開する。
@@ -154,30 +158,19 @@ public final class SectionManager {
         }
 
         captureExpansionDepth = 1
-        captureDesiredCollapsedState = isHiddenSectionCollapsed
         dividerItem.length = Self.hiddenSectionCollapsedLength
-        dividerItem.length = hiddenSectionExpandedLength
+        dividerItem.length = hiddenSectionTemporaryDisplayLength
         hiddenSection.isVisible = true
-        toggleItem.setIcon(
-            symbolName: Self.toggleExpandedSymbolName,
-            accessibilityDescription: Self.toggleItemAccessibilityDescription
-        )
         return true
     }
 
-    /// 撮像開始時の状態と撮像中のトグル操作を合流した最終状態を反映する。
+    /// 最後の撮像所有者が終了したら、非表示セクションを再び画面外へ戻す。
     public func endCaptureExpansion() {
         guard captureExpansionDepth > 0 else { return }
         captureExpansionDepth -= 1
         guard captureExpansionDepth == 0 else { return }
-        guard let desiredCollapsed = captureDesiredCollapsedState else { return }
-        captureDesiredCollapsedState = nil
-        setHiddenSectionCollapsed(desiredCollapsed)
-        if desiredCollapsed {
-            cancelPendingRehide()
-        } else if !isRehideScheduled {
-            scheduleRehideIfEnabled()
-        }
+        hiddenSection.dividerItem?.length = Self.hiddenSectionCollapsedLength
+        hiddenSection.isVisible = false
     }
 
     // MARK: - 常時非表示セクション
@@ -194,6 +187,9 @@ public final class SectionManager {
             }
             rehideAlwaysHiddenSection()
         } else {
+            if alwaysHiddenSection.isVisible {
+                rehideAlwaysHiddenSection()
+            }
             // isVisible=false は autosaveName に永続化され次回生成時も不可視になる。
             // 必ず remove() でステータスバーから取り除く（リークと永続化の両方を防ぐ）。
             alwaysHiddenSection.dividerItem?.remove()
@@ -219,21 +215,21 @@ public final class SectionManager {
     }
 
     /// 設定画面の「常時非表示セクションを一時的に表示する」ボタン用（接続は #11）。
-    /// 非表示セクションが畳まれていると ◆ より左は表示できないため、併せて展開する。
+    /// ◆ より左を表示できるよう、この経路に限ってメイン区切りも一時的に復元する。
     public func temporarilyShowAlwaysHiddenSection() {
         guard
             let dividerItem = alwaysHiddenSection.dividerItem,
             let expandedLength = alwaysHiddenSectionExpandedLength
         else { return }
 
-        if isHiddenSectionCollapsed {
-            setHiddenSectionCollapsed(false)
-        }
+        hiddenSection.dividerItem?.length = hiddenSectionTemporaryDisplayLength
+        hiddenSection.isVisible = true
         dividerItem.length = expandedLength
         alwaysHiddenSection.isVisible = true
     }
 
     public func rehideAlwaysHiddenSection() {
+        let wasTemporarilyShown = alwaysHiddenSection.isVisible
         guard let dividerItem = alwaysHiddenSection.dividerItem else {
             alwaysHiddenSection.isVisible = false
             return
@@ -241,15 +237,19 @@ public final class SectionManager {
 
         dividerItem.length = Self.hiddenSectionCollapsedLength
         alwaysHiddenSection.isVisible = false
+        if wasTemporarilyShown {
+            hiddenSection.dividerItem?.length = Self.hiddenSectionCollapsedLength
+            hiddenSection.isVisible = false
+        }
     }
 
     // MARK: - 自動再非表示
 
     /// 設定画面などで autoRehideEnabled が変更された際に呼ぶ。
-    /// 展開中に有効化されたら直ちにスケジュールし、無効化されたら保留分も取り消す。
+    /// サブバー表示中に有効化されたら直ちにスケジュールし、無効化されたら保留分も取り消す。
     public func autoRehideSettingDidChange() {
         if settings.autoRehideEnabled {
-            if !isHiddenSectionCollapsed, !isRehideScheduled {
+            if isSubBarOpen, !isRehideScheduled {
                 scheduleRehideIfEnabled()
             }
         } else {
@@ -258,7 +258,7 @@ public final class SectionManager {
     }
 
     private func scheduleRehideIfEnabled() {
-        guard settings.autoRehideEnabled, !isHiddenSectionCollapsed else {
+        guard settings.autoRehideEnabled, isSubBarOpen else {
             return
         }
 
@@ -274,22 +274,17 @@ public final class SectionManager {
         // 追跡終了時に改めて全秒数でスケジュールする（「タイマーを進めない」仕様の
         // 簡易実装として、残り時間の保持ではなく全秒数の再スケジュールを採る）。
         isRehideScheduled = false
-        guard !isHiddenSectionCollapsed else { return }
+        guard isSubBarOpen else { return }
 
         // スケジュール後に設定が無効化されたケースを発火時点で尊重する。
         guard settings.autoRehideEnabled else { return }
-
-        if captureDesiredCollapsedState != nil {
-            captureDesiredCollapsedState = true
-            return
-        }
 
         if isMenuTrackingActive {
             isRehideDeferred = true
             return
         }
 
-        setHiddenSectionCollapsed(true)
+        onSubBarToggleRequested?()
     }
 
     private func cancelPendingRehide() {
@@ -297,23 +292,5 @@ public final class SectionManager {
         guard isRehideScheduled else { return }
         rehideTimer.cancel()
         isRehideScheduled = false
-    }
-
-    private func setHiddenSectionCollapsed(_ collapsed: Bool) {
-        // 非表示セクションを畳むときは、一時表示中の常時非表示セクションも畳み直す
-        // （◆ より左だけが残る状態は存在しないため）。
-        if collapsed, alwaysHiddenSection.isVisible {
-            rehideAlwaysHiddenSection()
-        }
-        hiddenSection.isVisible = !collapsed
-        hiddenSection.dividerItem?.length = collapsed
-            ? Self.hiddenSectionCollapsedLength
-            : hiddenSectionExpandedLength
-        toggleItem.setIcon(
-            symbolName: collapsed
-                ? Self.toggleCollapsedSymbolName
-                : Self.toggleExpandedSymbolName,
-            accessibilityDescription: Self.toggleItemAccessibilityDescription
-        )
     }
 }
