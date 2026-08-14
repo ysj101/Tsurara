@@ -17,7 +17,7 @@ struct HotkeyRecorderView: View {
 
     var body: some View {
         Form {
-            LabeledContent("非表示セクションのトグル") {
+            LabeledContent("サブバーの開閉") {
                 Text(recorder.assignmentDisplay)
                     .monospaced()
             }

@@ -41,7 +41,7 @@ struct SectionManagerTests {
             #expect(manager.hiddenSection.dividerItem === createdItems[1].item)
             #expect(manager.alwaysHiddenSection.dividerItem == nil)
             #expect(createdItems[0].item.iconSymbolNames == [
-                SectionManager.toggleExpandedSymbolName
+                SectionManager.toggleClosedSymbolName
             ])
             #expect(createdItems[1].item.iconSymbolNames == [
                 SectionManager.mainDividerSymbolName
@@ -84,8 +84,12 @@ struct SectionManagerTests {
             #expect(manager.visibleSection.dividerItem == nil)
 
             #expect(manager.hiddenSection.kind == .hidden)
-            #expect(manager.hiddenSection.isVisible)
+            #expect(manager.hiddenSection.isVisible == false)
             #expect(manager.hiddenSection.dividerItem != nil)
+            #expect(
+                manager.hiddenSection.dividerItem?.length
+                    == SectionManager.hiddenSectionCollapsedLength
+            )
 
             #expect(manager.alwaysHiddenSection.kind == .alwaysHidden)
             #expect(manager.alwaysHiddenSection.isVisible == false)

@@ -19,33 +19,29 @@ private func makeToggleSettings(
 @MainActor
 struct SectionManagerToggleTests {
     @Test
-    func clickingToggleItemTogglesHiddenSectionAndIcon() {
+    func hiddenSectionStartsAndRemainsCollapsedWhenToggleIsClicked() {
         let mainDivider = MockStatusItem(length: StatusItemLength.square)
         let toggleItem = MockStatusItem(length: StatusItemLength.square)
         var items = [toggleItem, mainDivider]
         let manager = SectionManager(settings: makeToggleSettings()) { _ in
             items.removeFirst()
         }
-
-        #expect(toggleItem.iconSymbolNames == [
-            SectionManager.toggleExpandedSymbolName
-        ])
-        #expect(mainDivider.iconSymbolNames == [SectionManager.mainDividerSymbolName])
+        var toggleRequestCount = 0
+        manager.onSubBarToggleRequested = { toggleRequestCount += 1 }
+        let lengthHistoryAtLaunch = mainDivider.lengthHistory
 
         toggleItem.fireClick()
 
-        #expect(manager.isHiddenSectionCollapsed)
+        #expect(toggleRequestCount == 1)
         #expect(manager.hiddenSection.isVisible == false)
         #expect(mainDivider.length == SectionManager.hiddenSectionCollapsedLength)
-        #expect(
-            toggleItem.iconSymbolNames.last
-                == SectionManager.toggleCollapsedSymbolName
-        )
+        #expect(mainDivider.lengthHistory == lengthHistoryAtLaunch)
+        #expect(toggleItem.iconSymbolNames == [SectionManager.toggleClosedSymbolName])
         #expect(mainDivider.iconSymbolNames == [SectionManager.mainDividerSymbolName])
     }
 
     @Test
-    func repeatedToggleItemClicksAlternateIcons() {
+    func reportedSubBarStateAlternatesStatusIcon() {
         let mainDivider = MockStatusItem(length: StatusItemLength.square)
         let toggleItem = MockStatusItem(length: StatusItemLength.square)
         var items = [toggleItem, mainDivider]
@@ -53,70 +49,23 @@ struct SectionManagerToggleTests {
             items.removeFirst()
         }
 
-        toggleItem.fireClick()
-        toggleItem.fireClick()
-        toggleItem.fireClick()
-        toggleItem.fireClick()
+        manager.setSubBarOpen(true)
+        #expect(manager.isSubBarOpen)
+        manager.setSubBarOpen(false)
+        #expect(manager.isSubBarOpen == false)
+        manager.setSubBarOpen(true)
 
-        #expect(manager.isHiddenSectionCollapsed == false)
         #expect(toggleItem.iconSymbolNames == [
-            SectionManager.toggleExpandedSymbolName,
-            SectionManager.toggleCollapsedSymbolName,
-            SectionManager.toggleExpandedSymbolName,
-            SectionManager.toggleCollapsedSymbolName,
-            SectionManager.toggleExpandedSymbolName,
+            SectionManager.toggleClosedSymbolName,
+            SectionManager.toggleOpenSymbolName,
+            SectionManager.toggleClosedSymbolName,
+            SectionManager.toggleOpenSymbolName,
         ])
+        #expect(mainDivider.lengthHistory == [SectionManager.hiddenSectionCollapsedLength])
     }
 
     @Test
-    func visibleHiddenSectionCanBeCollapsed() {
-        let mainDivider = MockStatusItem(length: StatusItemLength.square)
-        let toggleItem = MockStatusItem(length: StatusItemLength.square)
-        var items = [toggleItem, mainDivider]
-        let manager = SectionManager(settings: makeToggleSettings()) { _ in
-            items.removeFirst()
-        }
-
-        #expect(manager.isHiddenSectionCollapsed == false)
-        #expect(manager.hiddenSection.isVisible)
-
-        manager.toggleHiddenSection()
-
-        #expect(manager.isHiddenSectionCollapsed)
-        #expect(manager.hiddenSection.isVisible == false)
-        #expect(
-            mainDivider.lengthHistory
-                == [SectionManager.hiddenSectionCollapsedLength]
-        )
-        // 定数の同語反復にならない実質的な検証: 画面幅を超える拡大であること。
-        #expect(mainDivider.length > 1_000)
-    }
-
-    @Test
-    func collapsedHiddenSectionCanBeShown() {
-        let mainDivider = MockStatusItem(length: StatusItemLength.square)
-        let toggleItem = MockStatusItem(length: StatusItemLength.square)
-        var items = [toggleItem, mainDivider]
-        let manager = SectionManager(settings: makeToggleSettings()) { _ in
-            items.removeFirst()
-        }
-        manager.toggleHiddenSection()
-
-        manager.toggleHiddenSection()
-
-        #expect(manager.isHiddenSectionCollapsed == false)
-        #expect(manager.hiddenSection.isVisible)
-        #expect(
-            mainDivider.lengthHistory
-                == [
-                    SectionManager.hiddenSectionCollapsedLength,
-                    StatusItemLength.square,
-                ]
-        )
-    }
-
-    @Test
-    func twoConsecutiveTogglesRestoreTheInitialState() {
+    func repeatedToggleRequestsNeverRestoreMainDividerLength() {
         let initialLength: CGFloat = 42
         let mainDivider = MockStatusItem(length: initialLength)
         let toggleItem = MockStatusItem(length: StatusItemLength.square)
@@ -124,32 +73,18 @@ struct SectionManagerToggleTests {
         let manager = SectionManager(settings: makeToggleSettings()) { _ in
             items.removeFirst()
         }
+        var toggleRequestCount = 0
+        manager.onSubBarToggleRequested = { toggleRequestCount += 1 }
 
-        manager.toggleHiddenSection()
-        manager.toggleHiddenSection()
+        manager.toggleSubBar()
+        manager.toggleSubBar()
+        manager.toggleSubBar()
 
-        #expect(manager.isHiddenSectionCollapsed == false)
-        #expect(manager.hiddenSection.isVisible)
-        #expect(mainDivider.length == initialLength)
-        #expect(
-            mainDivider.lengthHistory
-                == [SectionManager.hiddenSectionCollapsedLength, initialLength]
-        )
-
-        // トグル項目自身の length は決して変更されない（このリファクタの中心不変条件）。
+        #expect(toggleRequestCount == 3)
+        #expect(manager.hiddenSection.isVisible == false)
+        #expect(mainDivider.length == SectionManager.hiddenSectionCollapsedLength)
+        #expect(mainDivider.lengthHistory == [SectionManager.hiddenSectionCollapsedLength])
         #expect((manager.toggleItem as? MockStatusItem)?.lengthHistory.isEmpty == true)
-
-        // 奇数回目でも正しく collapse する（復元値の取り違えを検出）。
-        manager.toggleHiddenSection()
-        #expect(manager.isHiddenSectionCollapsed)
-        #expect(
-            mainDivider.lengthHistory
-                == [
-                    SectionManager.hiddenSectionCollapsedLength,
-                    initialLength,
-                    SectionManager.hiddenSectionCollapsedLength,
-                ]
-        )
     }
 
     @Test
@@ -165,8 +100,8 @@ struct SectionManagerToggleTests {
         }
         let lengthHistoryAtLaunch = secondaryDivider.lengthHistory
 
-        manager.toggleHiddenSection()
-        manager.toggleHiddenSection()
+        manager.toggleSubBar()
+        manager.toggleSubBar()
 
         #expect(secondaryDivider.length == SectionManager.hiddenSectionCollapsedLength)
         #expect(secondaryDivider.lengthHistory == lengthHistoryAtLaunch)
@@ -174,7 +109,7 @@ struct SectionManagerToggleTests {
     }
 
     @Test
-    func toggleDuringCaptureExpansionIsMergedOnRestore() {
+    func toggleDuringCaptureExpansionRequestsSubBarAndRestoreRecollapsesDivider() {
         let initialLength: CGFloat = 42
         let toggleItem = MockStatusItem(length: StatusItemLength.square)
         let mainDivider = MockStatusItem(windowID: 31, length: initialLength)
@@ -182,19 +117,21 @@ struct SectionManagerToggleTests {
         let manager = SectionManager(settings: makeToggleSettings()) { _ in
             items.removeFirst()
         }
+        var toggleRequestCount = 0
+        manager.onSubBarToggleRequested = { toggleRequestCount += 1 }
 
         #expect(manager.beginCaptureExpansion())
-        // 撮像中は実際の UI を展開したままにし、ユーザー操作を最終状態へ合流する。
+        // 撮像用の一時展開中でも、トグルはサブバー開閉だけを要求する。
         toggleItem.fireClick()
+        #expect(toggleRequestCount == 1)
         #expect(manager.hiddenSection.isVisible)
         #expect(mainDivider.length == initialLength)
 
         manager.endCaptureExpansion()
 
-        #expect(manager.isHiddenSectionCollapsed)
         #expect(manager.hiddenSection.isVisible == false)
         #expect(mainDivider.length == SectionManager.hiddenSectionCollapsedLength)
-        #expect(toggleItem.iconSymbolNames.last == SectionManager.toggleCollapsedSymbolName)
+        #expect(toggleItem.iconSymbolNames.last == SectionManager.toggleClosedSymbolName)
     }
 
     @Test
@@ -210,11 +147,12 @@ struct SectionManagerToggleTests {
 
         #expect(mainDivider.lengthHistory == [
             SectionManager.hiddenSectionCollapsedLength,
+            SectionManager.hiddenSectionCollapsedLength,
             StatusItemLength.square,
         ])
         manager.endCaptureExpansion()
-        #expect(manager.hiddenSection.isVisible)
-        #expect(mainDivider.length == StatusItemLength.square)
+        #expect(manager.hiddenSection.isVisible == false)
+        #expect(mainDivider.length == SectionManager.hiddenSectionCollapsedLength)
     }
 
     @Test
@@ -226,8 +164,6 @@ struct SectionManagerToggleTests {
         let manager = SectionManager(settings: makeToggleSettings()) { _ in
             items.removeFirst()
         }
-        manager.toggleHiddenSection()
-
         #expect(manager.beginCaptureExpansion())
         #expect(manager.beginCaptureExpansion())
         manager.endCaptureExpansion()
@@ -237,7 +173,7 @@ struct SectionManagerToggleTests {
 
         manager.endCaptureExpansion()
 
-        #expect(manager.isHiddenSectionCollapsed)
+        #expect(manager.hiddenSection.isVisible == false)
         #expect(mainDivider.length == SectionManager.hiddenSectionCollapsedLength)
     }
 
@@ -257,7 +193,7 @@ struct SectionManagerToggleTests {
 
         manager.endCaptureExpansion()
 
-        #expect(mainDivider.length == initialLength)
+        #expect(mainDivider.length == SectionManager.hiddenSectionCollapsedLength)
         #expect(mainDivider.lengthHistory == historyAfterRestore)
     }
 }

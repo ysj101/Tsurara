@@ -51,7 +51,9 @@ final class ScreenCapturePermissionOnboardingController {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "画面収録の許可を確認できません"
-        alert.informativeText = "サブバーは利用できませんが、メニューバーアイコンの非表示機能は引き続き動作します。システム設定で Tsurara を許可するか、権限をもう一度リクエストしてください。許可後も反映されない場合は、Tsurara を再起動してください。"
+        // 画面収録なしではサブバーを使えず、常時非表示セクションも既定で無効なため、
+        // 設定から一時表示機能を有効化する代替導線を明示して隠したアイコンを救済する。
+        alert.informativeText = "サブバーは利用できませんが、メニューバーアイコンの非表示機能は引き続き動作します。隠したアイコンを表示するには、Tsurara の雪の結晶アイコンを右クリックして「設定…」を開き、「常時非表示セクションを有効にする」をオンにしてから「常時非表示セクションを一時的に表示する」を押してください。システム設定で Tsurara を許可するか、権限をもう一度リクエストすることもできます。許可後も反映されない場合は、Tsurara を再起動してください。"
         alert.addButton(withTitle: "システム設定を開く")
         alert.addButton(withTitle: "権限を再リクエスト")
         alert.addButton(withTitle: "キャンセル")
