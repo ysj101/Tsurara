@@ -14,7 +14,7 @@ final class SubBarPanel: NSPanel, SubBarPanelPresenting {
 
     var onDismissRequest: (() -> Void)?
     /// Issue #34 で実アイテムへのクリック転送を差し込むための境界。
-    var onItemClick: ((ImagedMenuBarItem) -> Void)?
+    var onItemClick: ((ImagedMenuBarItem, MenuBarItemClickButton) -> Void)?
 
     private let layoutCalculator: any SubBarPanelLayoutCalculating
     private var anchorFrameProvider: (@MainActor () -> CGRect?)?
@@ -134,7 +134,9 @@ final class SubBarPanel: NSPanel, SubBarPanelPresenting {
             )
             itemView.image = NSImage(cgImage: item.image, size: size)
             itemView.toolTip = item.owner.name
-            itemView.onClick = { [weak self] in self?.onItemClick?(item) }
+            itemView.onClick = { [weak self] button in
+                self?.onItemClick?(item, button)
+            }
             document.addSubview(itemView)
             x += size.width
         }
@@ -201,7 +203,7 @@ final class SubBarPanel: NSPanel, SubBarPanelPresenting {
 /// クリック転送を後から追加できる、画像表示専用のセル。
 @MainActor
 private final class SubBarItemView: NSImageView {
-    var onClick: (() -> Void)?
+    var onClick: ((MenuBarItemClickButton) -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -216,7 +218,10 @@ private final class SubBarItemView: NSImageView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        // Issue #33 では表示だけを行う。クロージャ未設定時は意図的に no-op。
-        onClick?()
+        onClick?(event.modifierFlags.contains(.control) ? .right : .left)
+    }
+
+    override func rightMouseUp(with event: NSEvent) {
+        onClick?(.right)
     }
 }
