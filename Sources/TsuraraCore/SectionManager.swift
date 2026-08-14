@@ -36,15 +36,17 @@ public final class SectionManager {
     /// 実際にサブバーが表示されているか。撮像中はまだ false のままとする。
     public private(set) var isSubBarOpen = false
 
-    /// いずれかのメニューが開いている間 true。true の間に自動再非表示の時刻が来た場合は
-    /// 保留し、false へ戻ったときに再スケジュールする（メニュー検知はアプリ層の責務）。
+    /// いずれかのメニュー／ポップオーバーが開いている間 true。
+    /// true になった時点で自動クローズを一時停止し、false で残り時間から再開する。
+    /// メニュー検知はアプリ層の責務とする。
     public var isMenuTrackingActive = false {
         didSet {
-            guard oldValue, !isMenuTrackingActive, isRehideDeferred else {
-                return
+            guard oldValue != isMenuTrackingActive, isSubBarOpen else { return }
+            if isMenuTrackingActive {
+                pausePendingRehide()
+            } else {
+                resumePendingRehide()
             }
-            isRehideDeferred = false
-            scheduleRehideIfEnabled()
         }
     }
 
@@ -54,10 +56,13 @@ public final class SectionManager {
     private var alwaysHiddenSectionExpandedLength: CGFloat?
     private let settings: SettingsStore
     private let rehideTimer: any RehideTimerScheduling
+    private let currentTime: @MainActor () -> TimeInterval
     private var isRehideScheduled = false
     private var isRehideDeferred = false
     /// 撮像とクリック転送が同じ一時展開を共有できるよう、所有者数を保持する。
     private var captureExpansionDepth = 0
+    private var rehideDeadline: TimeInterval?
+    private var remainingRehideInterval: TimeInterval?
 
     // サブ区切りの実行時の有効化/無効化で区切りを追加生成するために保持する。
     private let statusItemFactory: (String) -> any StatusItem
@@ -65,10 +70,14 @@ public final class SectionManager {
     public init(
         settings: SettingsStore,
         rehideTimer: any RehideTimerScheduling = FoundationRehideTimerScheduler(),
+        currentTime: @escaping @MainActor () -> TimeInterval = {
+            ProcessInfo.processInfo.systemUptime
+        },
         statusItemFactory: @escaping (String) -> any StatusItem
     ) {
         self.settings = settings
         self.rehideTimer = rehideTimer
+        self.currentTime = currentTime
         self.statusItemFactory = statusItemFactory
 
         // 生成順が並び順を決める: NSStatusItem は後から作られたものほど左に並ぶため、
@@ -247,13 +256,14 @@ public final class SectionManager {
         }
     }
 
-    // MARK: - 自動再非表示
+    // MARK: - サブバーの自動クローズ
 
-    /// 設定画面などで autoRehideEnabled が変更された際に呼ぶ。
-    /// サブバー表示中に有効化されたら直ちにスケジュールし、無効化されたら保留分も取り消す。
+    /// 設定画面などで自動クローズ設定が変更された際に呼ぶ。
+    /// サブバー表示中の有効化・秒数変更は、新しい全秒数でスケジュールし直す。
     public func autoRehideSettingDidChange() {
         if settings.autoRehideEnabled {
-            if isSubBarOpen, !isRehideScheduled {
+            if isSubBarOpen {
+                cancelPendingRehide()
                 scheduleRehideIfEnabled()
             }
         } else {
@@ -261,23 +271,33 @@ public final class SectionManager {
         }
     }
 
-    private func scheduleRehideIfEnabled() {
+    private func scheduleRehideIfEnabled(after interval: TimeInterval? = nil) {
         guard settings.autoRehideEnabled, isSubBarOpen else {
             return
         }
 
+        let delay = interval ?? TimeInterval(settings.autoRehideSeconds)
+        if isMenuTrackingActive {
+            isRehideDeferred = true
+            remainingRehideInterval = delay
+            return
+        }
+
+        isRehideDeferred = false
+        remainingRehideInterval = nil
         isRehideScheduled = true
-        rehideTimer.schedule(after: TimeInterval(settings.autoRehideSeconds)) {
+        rehideDeadline = currentTime() + delay
+        rehideTimer.schedule(after: delay) {
             [weak self] in
             self?.rehideTimerFired()
         }
     }
 
     private func rehideTimerFired() {
-        // 単発タイマーは発火時点で消費済み。メニュー追跡中なら deferred に移し、
-        // 追跡終了時に改めて全秒数でスケジュールする（「タイマーを進めない」仕様の
-        // 簡易実装として、残り時間の保持ではなく全秒数の再スケジュールを採る）。
+        // 単発タイマーは発火時点で消費済み。通常はメニュー開始時にキャンセル
+        // されるが、発火との競合時にも追跡中のクローズを避ける。
         isRehideScheduled = false
+        rehideDeadline = nil
         guard isSubBarOpen else { return }
 
         // スケジュール後に設定が無効化されたケースを発火時点で尊重する。
@@ -285,16 +305,43 @@ public final class SectionManager {
 
         if isMenuTrackingActive {
             isRehideDeferred = true
+            remainingRehideInterval = 0
             return
         }
 
         onSubBarCloseRequested?()
     }
 
+    private func pausePendingRehide() {
+        guard settings.autoRehideEnabled else { return }
+
+        if isRehideScheduled {
+            let deadline = rehideDeadline ?? currentTime()
+            remainingRehideInterval = max(0, deadline - currentTime())
+            rehideTimer.cancel()
+            isRehideScheduled = false
+            rehideDeadline = nil
+        } else if remainingRehideInterval == nil {
+            remainingRehideInterval = TimeInterval(settings.autoRehideSeconds)
+        }
+        isRehideDeferred = true
+    }
+
+    private func resumePendingRehide() {
+        guard isRehideDeferred else { return }
+        let remaining = remainingRehideInterval
+        isRehideDeferred = false
+        remainingRehideInterval = nil
+        scheduleRehideIfEnabled(after: remaining)
+    }
+
     private func cancelPendingRehide() {
         isRehideDeferred = false
-        guard isRehideScheduled else { return }
-        rehideTimer.cancel()
-        isRehideScheduled = false
+        remainingRehideInterval = nil
+        rehideDeadline = nil
+        if isRehideScheduled {
+            rehideTimer.cancel()
+            isRehideScheduled = false
+        }
     }
 }

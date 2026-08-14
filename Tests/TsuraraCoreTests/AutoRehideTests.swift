@@ -33,13 +33,22 @@ private final class ManualRehideTimer: RehideTimerScheduling {
     }
 }
 
+@MainActor
+private final class ManualRehideClock {
+    var now: TimeInterval = 0
+
+    func advance(by interval: TimeInterval) {
+        now += interval
+    }
+}
+
 @Suite(.serialized)
 @MainActor
 struct AutoRehideTests {
     private func makeManager(
         autoRehideEnabled: Bool = true,
         autoRehideSeconds: Int = 15
-    ) -> (SectionManager, ManualRehideTimer, MockStatusItem) {
+    ) -> (SectionManager, ManualRehideTimer, ManualRehideClock, MockStatusItem) {
         let defaults = UserDefaults(suiteName: autoRehideSuiteName)!
         defaults.removePersistentDomain(forName: autoRehideSuiteName)
 
@@ -48,12 +57,14 @@ struct AutoRehideTests {
         settings.autoRehideSeconds = autoRehideSeconds
 
         let timer = ManualRehideTimer()
+        let clock = ManualRehideClock()
         let toggleItem = MockStatusItem(length: StatusItemLength.square)
         let divider = MockStatusItem(length: StatusItemLength.square)
         var items = [toggleItem, divider]
         let manager = SectionManager(
             settings: settings,
-            rehideTimer: timer
+            rehideTimer: timer,
+            currentTime: { clock.now }
         ) { _ in
             items.removeFirst()
         }
@@ -62,12 +73,12 @@ struct AutoRehideTests {
             manager.setSubBarOpen(!manager.isSubBarOpen)
         }
         manager.onSubBarCloseRequested = { manager.setSubBarOpen(false) }
-        return (manager, timer, divider)
+        return (manager, timer, clock, divider)
     }
 
     @Test
     func openSubBarIsAutomaticallyClosedAfterConfiguredDelay() {
-        let (manager, timer, _) = makeManager(autoRehideSeconds: 20)
+        let (manager, timer, _, _) = makeManager(autoRehideSeconds: 20)
 
         manager.setSubBarOpen(true)
 
@@ -81,7 +92,7 @@ struct AutoRehideTests {
 
     @Test
     func autoRehideRequestsIdempotentCloseInsteadOfToggle() {
-        let (manager, timer, _) = makeManager()
+        let (manager, timer, _, _) = makeManager()
         var toggleRequestCount = 0
         var closeRequestCount = 0
         manager.onSubBarToggleRequested = {
@@ -103,7 +114,7 @@ struct AutoRehideTests {
 
     @Test
     func disabledAutoRehideDoesNotScheduleOrClose() {
-        let (manager, timer, _) = makeManager(autoRehideEnabled: false)
+        let (manager, timer, _, _) = makeManager(autoRehideEnabled: false)
 
         manager.setSubBarOpen(true)
 
@@ -116,19 +127,22 @@ struct AutoRehideTests {
     }
 
     @Test
-    func menuTrackingDefersCloseUntilTrackingEndsAndTimerFiresAgain() {
-        let (manager, timer, _) = makeManager(autoRehideSeconds: 10)
+    func menuTrackingPausesTimerAndResumesWithRemainingDelay() {
+        let (manager, timer, clock, _) = makeManager(autoRehideSeconds: 10)
         manager.setSubBarOpen(true)
+        clock.advance(by: 4)
         manager.isMenuTrackingActive = true
-
-        timer.fire()
 
         #expect(manager.isSubBarOpen)
         #expect(timer.isScheduled == false)
+        #expect(timer.cancelCount == 1)
+
+        // メニューを開いている時間は自動クローズまでの残り時間に含めない。
+        clock.advance(by: 30)
 
         manager.isMenuTrackingActive = false
 
-        #expect(timer.scheduledDelays == [10, 10])
+        #expect(timer.scheduledDelays == [10, 6])
         #expect(timer.isScheduled)
 
         timer.fire()
@@ -137,8 +151,26 @@ struct AutoRehideTests {
     }
 
     @Test
+    func openingDuringMenuTrackingWaitsToStartAutoCloseTimer() {
+        let (manager, timer, clock, _) = makeManager(autoRehideSeconds: 10)
+        manager.isMenuTrackingActive = true
+
+        manager.setSubBarOpen(true)
+
+        #expect(manager.isSubBarOpen)
+        #expect(timer.scheduledDelays.isEmpty)
+        clock.advance(by: 30)
+
+        manager.isMenuTrackingActive = false
+
+        #expect(timer.scheduledDelays == [10])
+        timer.fire()
+        #expect(manager.isSubBarOpen == false)
+    }
+
+    @Test
     func manualCloseCancelsPendingTimerWithoutLaterSideEffects() {
-        let (manager, timer, divider) = makeManager()
+        let (manager, timer, _, divider) = makeManager()
         manager.setSubBarOpen(true)
         #expect(timer.isScheduled)
 

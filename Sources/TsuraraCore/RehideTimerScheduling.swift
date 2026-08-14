@@ -9,7 +9,7 @@ public protocol RehideTimerScheduling: AnyObject {
     func cancel()
 }
 
-/// アプリで使用するメイン RunLoop 上のタイマー。
+/// サブバーの自動クローズで使用するメイン RunLoop 上のタイマー。
 /// Foundation のみで実装し、TsuraraCore を AppKit から独立させる。
 @MainActor
 public final class FoundationRehideTimerScheduler: RehideTimerScheduling {

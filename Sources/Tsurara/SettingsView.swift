@@ -64,7 +64,7 @@ private struct GeneralSettingsView: View {
 
             HStack {
                 Toggle(
-                    "自動再非表示を有効にする",
+                    "サブバーを自動的に閉じる",
                     isOn: Binding(
                         get: { viewModel.autoRehideEnabled },
                         set: { enabled in
@@ -81,6 +81,9 @@ private struct GeneralSettingsView: View {
                     in: SettingsStore.autoRehideSecondsRange
                 )
                 .disabled(!viewModel.autoRehideEnabled)
+                .onChange(of: viewModel.autoRehideSeconds) {
+                    AppDelegate.sharedSectionManager?.autoRehideSettingDidChange()
+                }
             }
 
             Button("常時非表示セクションを一時的に表示する") {
