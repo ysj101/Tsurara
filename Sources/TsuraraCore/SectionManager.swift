@@ -29,6 +29,10 @@ public final class SectionManager {
     public let alwaysHiddenSection: MenuBarSection
     public let toggleItem: any StatusItem
 
+    /// 既存の length トグルに加えて、アプリ層へサブバー開閉要求を通知する。
+    /// nil の場合は従来どおり非表示セクションのトグルだけを行う。
+    public var onSubBarToggleRequested: (() -> Void)?
+
     /// 非表示セクションが畳まれているか。hiddenSection.isVisible を単一の情報源とする
     /// （二重管理にすると自動再非表示などの経路で不整合が起きるため）。
     public var isHiddenSectionCollapsed: Bool { !hiddenSection.isVisible }
@@ -132,6 +136,7 @@ public final class SectionManager {
             cancelPendingRehide()
             setHiddenSectionCollapsed(true)
         }
+        onSubBarToggleRequested?()
     }
 
     /// 画面外の項目を撮像する間だけ非表示セクションを強制展開する。

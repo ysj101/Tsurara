@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var openMenuCount = 0
     private var hotkeyManager: HotkeyManager?
     private var settingsWindow: NSWindow?
+    private var subBarCoordinator: SubBarCoordinator?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // バンドルの LSUIElement と同じ状態を、バンドルを介さない `swift run` でも
@@ -100,6 +101,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
             }
         }
+
+        let panel = SubBarPanel()
+        let presentationController = SubBarPresentationController(presenter: panel)
+        let coordinator = SubBarCoordinator(
+            manager: manager,
+            toggleItem: toggleItem,
+            imager: MenuBarItemImager(
+                windowLister: CGWindowMenuBarItemWindowLister(),
+                imageCapturer: ScreenCaptureKitMenuBarItemImageCapturer(),
+                capturePositioner: AppKitMenuBarItemCapturePositioner(
+                    sectionManager: manager
+                )
+            ),
+            permissionController: ScreenCapturePermissionOnboardingController(),
+            presentationController: presentationController
+        )
+        panel.onDismissRequest = { [weak coordinator] in coordinator?.close() }
+        manager.onSubBarToggleRequested = { [weak coordinator] in coordinator?.toggle() }
+        subBarCoordinator = coordinator
         sectionManager = manager
     }
 }
