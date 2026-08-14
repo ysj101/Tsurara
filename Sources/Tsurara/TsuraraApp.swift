@@ -22,7 +22,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let settings = SettingsStore()
     private var sectionManager: SectionManager?
     private var menuTrackingObservers: [any NSObjectProtocol] = []
-    private var openMenuCount = 0
     private var hotkeyManager: HotkeyManager?
     private var settingsWindow: NSWindow?
     private var subBarCoordinator: SubBarCoordinator?
@@ -37,7 +36,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusItemFactory: { AppKitStatusItem(autosaveName: $0) }
         )
         Self.sharedSectionManager = manager
-        observeMenuTracking(for: manager)
+        // observer はこのプロパティの manager を参照するため、登録より先に初期化する。
+        sectionManager = manager
+        observeMenuTracking()
         // release ビルドで下の型チェックが失敗して早期 return しても、
         // 設定済みホットキーの登録自体は失われないよう先に完了させる。
         let hotkeyManager = HotkeyManager(
@@ -69,7 +70,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let toggleItem = manager.toggleItem as? AppKitStatusItem else {
             // トグル項目が取れない状態は終了手段の喪失を意味するため、開発中に即気付けるようにする。
             assertionFailure("トグル項目が AppKitStatusItem ではない")
-            sectionManager = manager
             return
         }
         toggleItem.onRightClick = { [weak toggleItem] in
@@ -135,7 +135,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         manager.onSubBarToggleRequested = { [weak coordinator] in coordinator?.toggle() }
         manager.onSubBarCloseRequested = { [weak coordinator] in coordinator?.close() }
         subBarCoordinator = coordinator
-        sectionManager = manager
     }
 }
 
@@ -165,30 +164,25 @@ extension AppDelegate {
     /// NSMenu の通知は自プロセスのメニューにのみ届くため、他アプリのメニュー展開は
     /// 検知できない（MVP の既知の制約。spec の「いずれかのメニュー」への完全対応は
     /// 追加権限なしでは不可能なため、自アプリのメニューのみ対象とする）。
-    fileprivate func observeMenuTracking(for manager: SectionManager) {
+    fileprivate func observeMenuTracking() {
+        guard let sectionManager else { return }
         let center = NotificationCenter.default
         let begin = center.addObserver(
             forName: NSMenu.didBeginTrackingNotification,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
+        ) { [weak sectionManager] _ in
             MainActor.assumeIsolated {
-                guard let self else { return }
-                self.openMenuCount += 1
-                self.sectionManager?.isMenuTrackingActive = true
+                sectionManager?.beginAutoClosePause(source: .menuTracking)
             }
         }
         let end = center.addObserver(
             forName: NSMenu.didEndTrackingNotification,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
+        ) { [weak sectionManager] _ in
             MainActor.assumeIsolated {
-                guard let self else { return }
-                self.openMenuCount = max(0, self.openMenuCount - 1)
-                if self.openMenuCount == 0 {
-                    self.sectionManager?.isMenuTrackingActive = false
-                }
+                sectionManager?.endAutoClosePause(source: .menuTracking)
             }
         }
         menuTrackingObservers = [begin, end]

@@ -27,8 +27,8 @@ func settingsStoreUsesExpectedDefaults() {
 
         #expect(store.launchAtLogin == false)
         #expect(store.alwaysHiddenSectionEnabled == false)
-        #expect(store.autoRehideEnabled == true)
-        #expect(store.autoRehideSeconds == SettingsStore.defaultAutoRehideSeconds)
+        #expect(store.autoCloseEnabled == true)
+        #expect(store.autoCloseSeconds == SettingsStore.defaultAutoCloseSeconds)
         #expect(store.toggleHotkey == nil)
         #expect(store.hasRequestedScreenCaptureAccess == false)
         #expect(store.hasRequestedAccessibilityAccess == false)
@@ -43,8 +43,8 @@ func settingsStoreRoundTripsEveryProperty() {
 
         store.launchAtLogin = true
         store.alwaysHiddenSectionEnabled = true
-        store.autoRehideEnabled = false
-        store.autoRehideSeconds = 30
+        store.autoCloseEnabled = false
+        store.autoCloseSeconds = 30
         store.toggleHotkey = hotkey
         store.hasRequestedScreenCaptureAccess = true
         store.hasRequestedAccessibilityAccess = true
@@ -52,8 +52,8 @@ func settingsStoreRoundTripsEveryProperty() {
         let reloadedStore = SettingsStore(defaults: defaults)
         #expect(reloadedStore.launchAtLogin == true)
         #expect(reloadedStore.alwaysHiddenSectionEnabled == true)
-        #expect(reloadedStore.autoRehideEnabled == false)
-        #expect(reloadedStore.autoRehideSeconds == 30)
+        #expect(reloadedStore.autoCloseEnabled == false)
+        #expect(reloadedStore.autoCloseSeconds == 30)
         #expect(reloadedStore.toggleHotkey == hotkey)
         #expect(reloadedStore.hasRequestedScreenCaptureAccess == true)
         #expect(reloadedStore.hasRequestedAccessibilityAccess == true)
@@ -103,29 +103,29 @@ func accessibilityRequestFlagUsesReverseDNSKey() {
     (value: 60, expected: 60),
     (value: 61, expected: 60),
 ])
-func autoRehideSecondsIsClampedBeforePersistence(value: Int, expected: Int) {
+func autoCloseSecondsIsClampedBeforePersistence(value: Int, expected: Int) {
     withIsolatedDefaults { defaults in
         let store = SettingsStore(defaults: defaults)
 
-        store.autoRehideSeconds = value
+        store.autoCloseSeconds = value
 
-        #expect(store.autoRehideSeconds == expected)
-        #expect(SettingsStore(defaults: defaults).autoRehideSeconds == expected)
+        #expect(store.autoCloseSeconds == expected)
+        #expect(SettingsStore(defaults: defaults).autoCloseSeconds == expected)
     }
 }
 
 @Test
-func autoRehideSecondsClampsExternallyStoredValues() {
+func autoCloseSecondsClampsExternallyStoredValues() {
     withIsolatedDefaults { defaults in
         let store = SettingsStore(defaults: defaults)
 
         // defaults write 等でストアを介さずに書き込まれた値も範囲内に丸めて返す。
         defaults.set(0, forKey: "com.ysj.Tsurara.autoRehideSeconds")
-        #expect(store.autoRehideSeconds == 5)
+        #expect(store.autoCloseSeconds == 5)
 
         // 型不一致（文字列など）は既定値へフォールバックする。
         defaults.set("fifteen", forKey: "com.ysj.Tsurara.autoRehideSeconds")
-        #expect(store.autoRehideSeconds == SettingsStore.defaultAutoRehideSeconds)
+        #expect(store.autoCloseSeconds == SettingsStore.defaultAutoCloseSeconds)
     }
 }
 

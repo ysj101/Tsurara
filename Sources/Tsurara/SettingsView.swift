@@ -35,6 +35,16 @@ private struct GeneralSettingsView: View {
     @Bindable var viewModel: SettingsViewModel
     let loginItemSynchronizer: LoginItemSettingsSynchronizer
     @State private var loginItemErrorMessage: String?
+    @State private var autoCloseSecondsDraft: Int
+
+    init(
+        viewModel: SettingsViewModel,
+        loginItemSynchronizer: LoginItemSettingsSynchronizer
+    ) {
+        self.viewModel = viewModel
+        self.loginItemSynchronizer = loginItemSynchronizer
+        _autoCloseSecondsDraft = State(initialValue: viewModel.autoCloseSeconds)
+    }
 
     var body: some View {
         Form {
@@ -64,23 +74,23 @@ private struct GeneralSettingsView: View {
 
             HStack {
                 Toggle(
-                    "自動再非表示を有効にする",
+                    "サブバーを自動的に閉じる",
                     isOn: Binding(
-                        get: { viewModel.autoRehideEnabled },
+                        get: { viewModel.autoCloseEnabled },
                         set: { enabled in
-                            viewModel.autoRehideEnabled = enabled
+                            viewModel.autoCloseEnabled = enabled
                             // 展開中の有効化を即座に反映する（再トグル待ちにしない）。
-                            AppDelegate.sharedSectionManager?.autoRehideSettingDidChange()
+                            AppDelegate.sharedSectionManager?.autoCloseSettingDidChange()
                         }
                     )
                 )
                 Spacer()
                 Stepper(
-                    "\(viewModel.autoRehideSeconds) 秒",
-                    value: $viewModel.autoRehideSeconds,
-                    in: SettingsStore.autoRehideSecondsRange
+                    "\(autoCloseSecondsDraft) 秒",
+                    value: $autoCloseSecondsDraft,
+                    in: SettingsStore.autoCloseSecondsRange
                 )
-                .disabled(!viewModel.autoRehideEnabled)
+                .disabled(!viewModel.autoCloseEnabled)
             }
 
             Button("常時非表示セクションを一時的に表示する") {
@@ -93,8 +103,18 @@ private struct GeneralSettingsView: View {
         .padding()
         .onAppear {
             viewModel.refresh()
+            autoCloseSecondsDraft = viewModel.autoCloseSeconds
             // システム設定側で変更されている可能性があるため、実状態と同期する。
             viewModel.launchAtLogin = loginItemSynchronizer.sync()
+        }
+        // Stepper の連打中は永続化も再スケジュールも行わず、操作が落ち着いてから
+        // 一度だけ反映する。SectionManager 側では新しい全秒数へフルリセットされる。
+        .task(id: autoCloseSecondsDraft) {
+            guard autoCloseSecondsDraft != viewModel.autoCloseSeconds else { return }
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            viewModel.autoCloseSeconds = autoCloseSecondsDraft
+            AppDelegate.sharedSectionManager?.autoCloseSettingDidChange()
         }
         .alert(
             "ログイン時起動を変更できませんでした",

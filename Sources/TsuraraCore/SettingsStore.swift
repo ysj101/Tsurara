@@ -13,14 +13,15 @@ public struct HotkeyConfiguration: Codable, Equatable, Sendable {
 // 可変の格納プロパティを持たず、UserDefaults はスレッドセーフが保証されているため
 // @unchecked で Sendable を明示する（SDK の UserDefaults は Sendable 未宣言）。
 public final class SettingsStore: @unchecked Sendable {
-    public static let autoRehideSecondsRange: ClosedRange<Int> = 5...60
-    public static let defaultAutoRehideSeconds = 15
+    public static let autoCloseSecondsRange: ClosedRange<Int> = 5...60
+    public static let defaultAutoCloseSeconds = 15
 
     private enum Key: String {
         case launchAtLogin = "com.ysj.Tsurara.launchAtLogin"
         case alwaysHiddenSectionEnabled = "com.ysj.Tsurara.alwaysHiddenSectionEnabled"
-        case autoRehideEnabled = "com.ysj.Tsurara.autoRehideEnabled"
-        case autoRehideSeconds = "com.ysj.Tsurara.autoRehideSeconds"
+        // 永続化キーは既存ユーザーの設定を引き継ぐため変更しない。
+        case autoCloseEnabled = "com.ysj.Tsurara.autoRehideEnabled"
+        case autoCloseSeconds = "com.ysj.Tsurara.autoRehideSeconds"
         case toggleHotkey = "com.ysj.Tsurara.toggleHotkey"
         case hasRequestedScreenCaptureAccess =
             "com.ysj.Tsurara.hasRequestedScreenCaptureAccess"
@@ -44,20 +45,20 @@ public final class SettingsStore: @unchecked Sendable {
         set { defaults.set(newValue, forKey: Key.alwaysHiddenSectionEnabled.rawValue) }
     }
 
-    public var autoRehideEnabled: Bool {
-        get { defaults.object(forKey: Key.autoRehideEnabled.rawValue) as? Bool ?? true }
-        set { defaults.set(newValue, forKey: Key.autoRehideEnabled.rawValue) }
+    public var autoCloseEnabled: Bool {
+        get { defaults.object(forKey: Key.autoCloseEnabled.rawValue) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.autoCloseEnabled.rawValue) }
     }
 
     /// 秒数は読み書き双方向で 5〜60 に制限する。外部から範囲外の値が
     /// 書き込まれても（defaults write 等）、呼び出し側には常に範囲内の値を返す。
-    public var autoRehideSeconds: Int {
+    public var autoCloseSeconds: Int {
         get {
-            let stored = defaults.object(forKey: Key.autoRehideSeconds.rawValue) as? Int
-            return Self.clampSeconds(stored ?? Self.defaultAutoRehideSeconds)
+            let stored = defaults.object(forKey: Key.autoCloseSeconds.rawValue) as? Int
+            return Self.clampSeconds(stored ?? Self.defaultAutoCloseSeconds)
         }
         set {
-            defaults.set(Self.clampSeconds(newValue), forKey: Key.autoRehideSeconds.rawValue)
+            defaults.set(Self.clampSeconds(newValue), forKey: Key.autoCloseSeconds.rawValue)
         }
     }
 
@@ -112,6 +113,6 @@ public final class SettingsStore: @unchecked Sendable {
     }
 
     private static func clampSeconds(_ value: Int) -> Int {
-        min(max(value, autoRehideSecondsRange.lowerBound), autoRehideSecondsRange.upperBound)
+        min(max(value, autoCloseSecondsRange.lowerBound), autoCloseSecondsRange.upperBound)
     }
 }

@@ -143,7 +143,7 @@ struct AlwaysHiddenSectionTests {
     }
 
     @Test
-    func togglingSubBarRehidesTemporarilyShownSection() {
+    func togglingSubBarHidesTemporarilyShownSection() {
         withAlwaysHiddenSettings(enabled: true) { settings in
             let toggleItem = MockStatusItem(length: StatusItemLength.square)
             let mainDivider = MockStatusItem(length: StatusItemLength.square)
@@ -167,7 +167,7 @@ struct AlwaysHiddenSectionTests {
     }
 
     @Test
-    func temporarilyShowThenRehideTransitionsSection() {
+    func temporarilyShowThenHideTransitionsSection() {
         withAlwaysHiddenSettings(enabled: true) { settings in
             let originalLength: CGFloat = 37
             let toggleItem = MockStatusItem(length: StatusItemLength.square)
@@ -185,7 +185,7 @@ struct AlwaysHiddenSectionTests {
             #expect(subDivider.length == originalLength)
             #expect(manager.alwaysHiddenSection.isVisible)
 
-            manager.rehideAlwaysHiddenSection()
+            manager.hideAlwaysHiddenSection()
 
             #expect(subDivider.length == SectionManager.hiddenSectionCollapsedLength)
             #expect(manager.alwaysHiddenSection.isVisible == false)
