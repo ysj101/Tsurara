@@ -9,11 +9,14 @@ final class AppKitStatusItem: NSObject, StatusItem {
     private var statusItem: NSStatusItem { underlying }
 
     /// CGWindowList / ScreenCaptureKit で同じ NSStatusItem ウィンドウを解決する ID。
+    /// macOS 26 系ではステータス項目の `windowNumber` が UInt32 を超える値
+    /// （実測 2^32）を返すため、`CGWindowID(_:)` の非失敗変換はトラップする。
+    /// 収まらない場合は nil を返し、呼び出し側は撮像を諦めてサブバーを閉じる。
     var windowID: CGWindowID? {
         guard let number = statusItem.button?.window?.windowNumber, number > 0 else {
             return nil
         }
-        return CGWindowID(number)
+        return CGWindowID(exactly: number)
     }
 
     var length: CGFloat {
