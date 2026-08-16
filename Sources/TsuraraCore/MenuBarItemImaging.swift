@@ -53,6 +53,9 @@ public extension MenuBarItemWindow {
 public struct ImagedMenuBarItem: @unchecked Sendable {
     public let windowID: CGWindowID
     public let image: CGImage
+    /// セクション判定時（撮像用に一時展開する前）の CG グローバル座標。
+    /// クリック転送時に同じ実項目を幾何的に再特定するため保持する。
+    public let sourceFrame: CGRect
     public let frame: CGRect
     public let owner: MenuBarItemOwner
     /// メニューバーを左から右へ見たときの 0 始まりの順序。
@@ -62,11 +65,13 @@ public struct ImagedMenuBarItem: @unchecked Sendable {
         windowID: CGWindowID,
         image: CGImage,
         frame: CGRect,
+        sourceFrame: CGRect? = nil,
         owner: MenuBarItemOwner,
         order: Int
     ) {
         self.windowID = windowID
         self.image = image
+        self.sourceFrame = sourceFrame ?? frame
         self.frame = frame
         self.owner = owner
         self.order = order
@@ -76,8 +81,6 @@ public struct ImagedMenuBarItem: @unchecked Sendable {
 public enum MenuBarItemImagingError: Error, Equatable, LocalizedError {
     /// ScreenCaptureKit を呼ぶ前の preflight で権限がないことを検出した。
     case screenRecordingPermissionDenied
-    /// 区切りが列挙結果にない場合、誤ったアプリを撮像しないよう処理を中止する。
-    case dividerWindowNotFound(windowID: CGWindowID)
     /// ScreenCaptureKit の共有可能コンテンツから対象ウィンドウを解決できなかった。
     case captureWindowNotFound(windowID: CGWindowID)
     /// 同じ Imager に対する撮像要求がすでに進行中。
@@ -87,8 +90,6 @@ public enum MenuBarItemImagingError: Error, Equatable, LocalizedError {
         switch self {
         case .screenRecordingPermissionDenied:
             "画面収録の許可を確認できません。"
-        case let .dividerWindowNotFound(windowID):
-            "区切り項目（ウィンドウID: \(windowID)）が見つかりません。"
         case let .captureWindowNotFound(windowID):
             "撮像対象（ウィンドウID: \(windowID)）が見つかりません。"
         case .captureAlreadyInProgress:
@@ -133,7 +134,7 @@ private final class NoopMenuBarItemCapturePositioner: MenuBarItemCapturePosition
     func restoreAfterCapture() {}
 }
 
-/// 区切りウィンドウを基準に非表示セクションを選び、撮像結果へ組み立てる。
+/// 区切りの画面座標を基準に非表示セクションを選び、撮像結果へ組み立てる。
 @MainActor
 public final class MenuBarItemImager {
     private let windowLister: any MenuBarItemWindowListing
@@ -158,8 +159,9 @@ public final class MenuBarItemImager {
     }
 
     public func captureHiddenItems(
-        mainDividerWindowID: CGWindowID,
-        subDividerWindowID: CGWindowID?
+        mainDividerFrame: CGRect,
+        subDividerFrame: CGRect?,
+        displayFrames: [CGRect]
     ) async throws -> [ImagedMenuBarItem] {
         guard !isCapturing else {
             throw MenuBarItemImagingError.captureAlreadyInProgress
@@ -171,10 +173,15 @@ public final class MenuBarItemImager {
         try imageCapturer.verifyScreenRecordingPermission()
 
         let initialWindows = try windowLister.listMenuBarItemWindows()
-        var targets = try hiddenWindows(
+        var targets = MenuBarItemSectionGeometry.hiddenWindows(
             in: initialWindows,
-            mainDividerWindowID: mainDividerWindowID,
-            subDividerWindowID: subDividerWindowID
+            mainDividerFrame: mainDividerFrame,
+            subDividerFrame: subDividerFrame,
+            displayFrames: displayFrames
+        )
+        let sourceFramesByID = Dictionary(
+            targets.map { ($0.windowID, $0.frame) },
+            uniquingKeysWith: { first, _ in first }
         )
 
         let repositioned = capturePositioner.prepareForCapture(of: targets)
@@ -187,7 +194,7 @@ public final class MenuBarItemImager {
         if repositioned {
             targets = try await waitForRepositionedWindows(targets)
         }
-        return try await capture(targets)
+        return try await capture(targets, sourceFramesByID: sourceFramesByID)
     }
 
     private func waitForRepositionedWindows(
@@ -213,72 +220,9 @@ public final class MenuBarItemImager {
         return refreshed.filter(capturePositioner.isReadyForCapture)
     }
 
-    private func hiddenWindows(
-        in windows: [MenuBarItemWindow],
-        mainDividerWindowID: CGWindowID,
-        subDividerWindowID: CGWindowID?
-    ) throws -> [MenuBarItemWindow] {
-        let mainDivider = try divider(
-            windowID: mainDividerWindowID,
-            in: windows
-        )
-
-        let subDivider: MenuBarItemWindow?
-        if let subDividerWindowID {
-            subDivider = try divider(windowID: subDividerWindowID, in: windows)
-        } else {
-            subDivider = nil
-        }
-
-        // 拡大した区切りのウィンドウ自体も数千 pt 幅になる。center では元の境界を
-        // 表せないため、メイン区切りの左端とサブ区切りの右端を境界として使う。
-        return windows
-            .filter { window in
-                guard window.windowID != mainDividerWindowID,
-                      window.windowID != subDividerWindowID,
-                      // 複数ディスプレイで同じ x 座標にある別メニューバーの
-                      // ウィンドウを混ぜない。CGWindow の座標系の y 方向は
-                      // NSScreen と異なるため、ここでは列挙結果同士だけを比較する。
-                      window.frame.maxY > mainDivider.frame.minY,
-                      window.frame.minY < mainDivider.frame.maxY,
-                      belongsToSameDisplay(window, as: mainDivider),
-                      window.frame.maxX <= mainDivider.frame.minX
-                else { return false }
-                return subDivider.map { window.frame.minX >= $0.frame.maxX } ?? true
-            }
-            .sorted {
-                if $0.frame.minX == $1.frame.minX {
-                    return $0.windowID < $1.windowID
-                }
-                return $0.frame.minX < $1.frame.minX
-            }
-    }
-
-    private func divider(
-        windowID: CGWindowID,
-        in windows: [MenuBarItemWindow]
-    ) throws -> MenuBarItemWindow {
-        guard let divider = windows.first(where: { $0.windowID == windowID }) else {
-            throw MenuBarItemImagingError.dividerWindowNotFound(windowID: windowID)
-        }
-        return divider
-    }
-
-    private func belongsToSameDisplay(
-        _ window: MenuBarItemWindow,
-        as divider: MenuBarItemWindow
-    ) -> Bool {
-        guard let dividerDisplay = divider.displayFrame else {
-            // 所属情報がない実装では、従来どおり同一メニューバー行で判定する。
-            return true
-        }
-        // どの画面とも交差しない項目は divider の拡大で画面外へ押し出された
-        // 対象なので含める。別画面に属すると判明した項目だけを除外する。
-        return window.displayFrame.map { $0 == dividerDisplay } ?? true
-    }
-
     private func capture(
-        _ windows: [MenuBarItemWindow]
+        _ windows: [MenuBarItemWindow],
+        sourceFramesByID: [CGWindowID: CGRect]
     ) async throws -> [ImagedMenuBarItem] {
         let imagesByID = try await imageCapturer.capture(
             windowIDs: windows.map(\.windowID)
@@ -292,11 +236,71 @@ public final class MenuBarItemImager {
                     windowID: window.windowID,
                     image: image,
                     frame: window.frame,
+                    sourceFrame: sourceFramesByID[window.windowID],
                     owner: window.owner,
                     order: results.count
                 )
             )
         }
         return results
+    }
+}
+
+/// macOS 26 で自プロセスの status-level window が列挙されなくても使えるよう、
+/// 区切り自体の windowID ではなく AppKit から得た CG グローバル座標を境界にする。
+enum MenuBarItemSectionGeometry {
+    static func hiddenWindows(
+        in windows: [MenuBarItemWindow],
+        mainDividerFrame: CGRect,
+        subDividerFrame: CGRect?,
+        displayFrames: [CGRect]
+    ) -> [MenuBarItemWindow] {
+        let dividerDisplay = displayContainingDivider(
+            mainDividerFrame,
+            among: displayFrames
+        )
+
+        // 拡大した区切りは数千 pt 幅になるため center は元の境界を表さない。
+        // 従来どおり、メイン区切りの左端とサブ区切りの右端を使う。
+        return windows
+            .filter { window in
+                guard window.frame.maxY > mainDividerFrame.minY,
+                      window.frame.minY < mainDividerFrame.maxY,
+                      belongsToSameDisplay(window, dividerDisplay: dividerDisplay),
+                      window.frame.maxX <= mainDividerFrame.minX
+                else { return false }
+                return subDividerFrame.map {
+                    window.frame.minX >= $0.maxX
+                } ?? true
+            }
+            .sorted {
+                if $0.frame.minX == $1.frame.minX {
+                    return $0.windowID < $1.windowID
+                }
+                return $0.frame.minX < $1.frame.minX
+            }
+    }
+
+    private static func displayContainingDivider(
+        _ divider: CGRect,
+        among displayFrames: [CGRect]
+    ) -> CGRect? {
+        // status item の右端は length を広げてもメニューバー上の固定位置に残る。
+        // 境界上の丸め誤差を避け、右端から半 pt 内側の点で所属画面を決める。
+        let point = CGPoint(
+            x: max(divider.minX, divider.maxX - 0.5),
+            y: divider.midY
+        )
+        return displayFrames.first { $0.contains(point) }
+    }
+
+    private static func belongsToSameDisplay(
+        _ window: MenuBarItemWindow,
+        dividerDisplay: CGRect?
+    ) -> Bool {
+        guard let dividerDisplay else { return true }
+        // どの画面とも交差しない項目は区切りの拡大で画面外へ押し出された対象。
+        // 別画面に属すると判明した項目だけを除外する。
+        return window.displayFrame.map { $0 == dividerDisplay } ?? true
     }
 }

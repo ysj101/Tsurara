@@ -112,7 +112,7 @@ struct SectionManagerToggleTests {
     func toggleDuringCaptureExpansionRequestsSubBarAndRestoreRecollapsesDivider() {
         let initialLength: CGFloat = 42
         let toggleItem = MockStatusItem(length: StatusItemLength.square)
-        let mainDivider = MockStatusItem(windowID: 31, length: initialLength)
+        let mainDivider = MockStatusItem(length: initialLength)
         var items = [toggleItem, mainDivider]
         let manager = SectionManager(settings: makeToggleSettings()) { _ in
             items.removeFirst()

@@ -8,8 +8,6 @@ final class MockStatusItem: StatusItem {
         let accessibilityDescription: String
     }
 
-    var windowID: CGWindowID?
-
     var length: CGFloat {
         didSet { lengthHistory.append(length) }
     }
@@ -28,11 +26,9 @@ final class MockStatusItem: StatusItem {
     var iconSymbolNames: [String] { icons.map(\.symbolName) }
 
     init(
-        windowID: CGWindowID? = nil,
         length: CGFloat = 0,
         isVisible: Bool = true
     ) {
-        self.windowID = windowID
         self.length = length
         self.isVisible = isVisible
     }

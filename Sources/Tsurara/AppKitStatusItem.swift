@@ -2,21 +2,22 @@ import AppKit
 import TsuraraCore
 
 @MainActor
-final class AppKitStatusItem: NSObject, StatusItem {
+final class AppKitStatusItem: NSObject, StatusItem, DividerFrameProviding {
     /// アプリ層がメニュー設定など NSStatusItem 固有の操作を行うための参照。
     let underlying: NSStatusItem
 
     private var statusItem: NSStatusItem { underlying }
 
-    /// CGWindowList / ScreenCaptureKit で同じ NSStatusItem ウィンドウを解決する ID。
-    /// macOS 26 系ではステータス項目の `windowNumber` が UInt32 を超える値
-    /// （実測 2^32）を返すため、`CGWindowID(_:)` の非失敗変換はトラップする。
-    /// 収まらない場合は nil を返し、呼び出し側は撮像を諦めてサブバーを閉じる。
-    var windowID: CGWindowID? {
-        guard let number = statusItem.button?.window?.windowNumber, number > 0 else {
-            return nil
-        }
-        return CGWindowID(exactly: number)
+    /// CGWindow と同じ、主画面左上原点のグローバル座標。
+    var dividerFrame: CGRect? {
+        guard let button = statusItem.button, let window = button.window,
+              let primaryMaxY = NSScreen.screens.first?.frame.maxY
+        else { return nil }
+        let appKitFrame = window.convertToScreen(button.convert(button.bounds, to: nil))
+        return CGWindowCoordinateSpace.frame(
+            fromAppKit: appKitFrame,
+            primaryMaxY: primaryMaxY
+        )
     }
 
     var length: CGFloat {

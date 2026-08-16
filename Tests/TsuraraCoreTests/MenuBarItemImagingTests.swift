@@ -98,6 +98,10 @@ private func window(
     )
 }
 
+private let testDisplayFrames = [
+    CGRect(x: -5_000, y: 0, width: 10_000, height: 1_080)
+]
+
 @MainActor
 @Suite
 struct MenuBarItemImagingTests {
@@ -125,8 +129,9 @@ struct MenuBarItemImagingTests {
         let imager = MenuBarItemImager(windowLister: lister, imageCapturer: capturer)
 
         let images = try await imager.captureHiddenItems(
-            mainDividerWindowID: 1,
-            subDividerWindowID: 2
+            mainDividerFrame: CGRect(x: -20, y: 0, width: 200, height: 24),
+            subDividerFrame: CGRect(x: -200, y: 0, width: 100, height: 24),
+            displayFrames: testDisplayFrames
         )
 
         #expect(images.map(\.windowID) == [12, 11])
@@ -147,8 +152,9 @@ struct MenuBarItemImagingTests {
         )
 
         let images = try await imager.captureHiddenItems(
-            mainDividerWindowID: 1,
-            subDividerWindowID: nil
+            mainDividerFrame: CGRect(x: 40, y: 0, width: 20, height: 24),
+            subDividerFrame: nil,
+            displayFrames: testDisplayFrames
         )
 
         #expect(images.map(\.windowID) == [20])
@@ -167,8 +173,9 @@ struct MenuBarItemImagingTests {
         )
 
         let images = try await imager.captureHiddenItems(
-            mainDividerWindowID: 1,
-            subDividerWindowID: nil
+            mainDividerFrame: CGRect(x: 40, y: 0, width: 20, height: 24),
+            subDividerFrame: nil,
+            displayFrames: testDisplayFrames
         )
 
         #expect(images.map(\.windowID) == [10])
@@ -189,8 +196,9 @@ struct MenuBarItemImagingTests {
         )
 
         let images = try await imager.captureHiddenItems(
-            mainDividerWindowID: 1,
-            subDividerWindowID: nil
+            mainDividerFrame: CGRect(x: 40, y: 0, width: 20, height: 24),
+            subDividerFrame: nil,
+            displayFrames: [leftDisplay, mainDisplay]
         )
 
         #expect(images.map(\.windowID) == [10])
@@ -211,12 +219,14 @@ struct MenuBarItemImagingTests {
         )
 
         let images = try await imager.captureHiddenItems(
-            mainDividerWindowID: 1,
-            subDividerWindowID: nil
+            mainDividerFrame: CGRect(x: -70, y: 0, width: 100, height: 24),
+            subDividerFrame: nil,
+            displayFrames: testDisplayFrames
         )
 
         #expect(lister.callCount == 2)
         #expect(images.map(\.frame.minX) == [500])
+        #expect(images.map(\.sourceFrame.minX) == [-100])
         #expect(positioner.preparedWindows.map(\.windowID) == [10])
         #expect(positioner.restoreCallCount == 1)
     }
@@ -239,8 +249,9 @@ struct MenuBarItemImagingTests {
         )
 
         let images = try await imager.captureHiddenItems(
-            mainDividerWindowID: 1,
-            subDividerWindowID: nil
+            mainDividerFrame: CGRect(x: -70, y: 0, width: 100, height: 24),
+            subDividerFrame: nil,
+            displayFrames: testDisplayFrames
         )
 
         #expect(lister.callCount == 3)
@@ -265,8 +276,9 @@ struct MenuBarItemImagingTests {
         )
 
         let images = try await imager.captureHiddenItems(
-            mainDividerWindowID: 1,
-            subDividerWindowID: nil
+            mainDividerFrame: CGRect(x: -50, y: 0, width: 100, height: 24),
+            subDividerFrame: nil,
+            displayFrames: testDisplayFrames
         )
 
         #expect(images.map(\.windowID) == [11])
@@ -289,8 +301,9 @@ struct MenuBarItemImagingTests {
         )
         let task = Task {
             try await imager.captureHiddenItems(
-                mainDividerWindowID: 1,
-                subDividerWindowID: nil
+                mainDividerFrame: CGRect(x: -70, y: 0, width: 100, height: 24),
+                subDividerFrame: nil,
+                displayFrames: testDisplayFrames
             )
         }
         while lister.callCount < 2 { await Task.yield() }
@@ -318,16 +331,18 @@ struct MenuBarItemImagingTests {
         )
         let first = Task {
             try await imager.captureHiddenItems(
-                mainDividerWindowID: 1,
-                subDividerWindowID: nil
+                mainDividerFrame: CGRect(x: -70, y: 0, width: 100, height: 24),
+                subDividerFrame: nil,
+                displayFrames: testDisplayFrames
             )
         }
         while lister.callCount < 2 { await Task.yield() }
 
         await #expect(throws: MenuBarItemImagingError.captureAlreadyInProgress) {
             try await imager.captureHiddenItems(
-                mainDividerWindowID: 1,
-                subDividerWindowID: nil
+                mainDividerFrame: CGRect(x: -70, y: 0, width: 100, height: 24),
+                subDividerFrame: nil,
+                displayFrames: testDisplayFrames
             )
         }
         first.cancel()
@@ -351,8 +366,9 @@ struct MenuBarItemImagingTests {
         )
 
         let images = try? await imager.captureHiddenItems(
-            mainDividerWindowID: 1,
-            subDividerWindowID: nil
+            mainDividerFrame: CGRect(x: -50, y: 0, width: 100, height: 24),
+            subDividerFrame: nil,
+            displayFrames: testDisplayFrames
         )
 
         #expect(positioner.restoreCallCount == 1)
@@ -370,19 +386,47 @@ struct MenuBarItemImagingTests {
         )
 
         await #expect(throws: MenuBarItemImagingError.screenRecordingPermissionDenied) {
-            try await imager.captureHiddenItems(mainDividerWindowID: 1, subDividerWindowID: nil)
+            try await imager.captureHiddenItems(
+                mainDividerFrame: CGRect(x: 20, y: 0, width: 20, height: 24),
+                subDividerFrame: nil,
+                displayFrames: testDisplayFrames
+            )
         }
     }
 
     @Test
-    func reportsMissingDividerInsteadOfGuessingSectionBoundaries() async {
+    func dividerDoesNotNeedToExistInWindowList() async throws {
         let imager = MenuBarItemImager(
             windowLister: StubMenuBarWindowLister([[window(10, x: 20)]]),
             imageCapturer: StubMenuBarImageCapturer()
         )
 
-        await #expect(throws: MenuBarItemImagingError.dividerWindowNotFound(windowID: 1)) {
-            try await imager.captureHiddenItems(mainDividerWindowID: 1, subDividerWindowID: nil)
-        }
+        let images = try await imager.captureHiddenItems(
+            mainDividerFrame: CGRect(x: 40, y: 0, width: 20, height: 24),
+            subDividerFrame: nil,
+            displayFrames: testDisplayFrames
+        )
+
+        #expect(images.map(\.windowID) == [10])
+    }
+
+    @Test
+    func excludesOtherDisplayWhenDividerDisplayHasNoListedStatusWindows() async throws {
+        let leftDisplay = CGRect(x: -1_920, y: 0, width: 1_920, height: 1_080)
+        let mainDisplay = CGRect(x: 0, y: 0, width: 1_920, height: 1_080)
+        let imager = MenuBarItemImager(
+            windowLister: StubMenuBarWindowLister([[
+                window(20, x: -40, displayFrame: leftDisplay)
+            ]]),
+            imageCapturer: StubMenuBarImageCapturer()
+        )
+
+        let images = try await imager.captureHiddenItems(
+            mainDividerFrame: CGRect(x: 40, y: 0, width: 20, height: 24),
+            subDividerFrame: nil,
+            displayFrames: [leftDisplay, mainDisplay]
+        )
+
+        #expect(images.isEmpty)
     }
 }

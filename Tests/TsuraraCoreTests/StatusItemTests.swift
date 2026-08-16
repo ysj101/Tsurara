@@ -3,15 +3,6 @@ import TsuraraCore
 
 @Test
 @MainActor
-func windowIDIsAvailableThroughStatusItemProtocol() {
-    let mock = MockStatusItem(windowID: 31)
-    let statusItem: any StatusItem = mock
-
-    #expect(statusItem.windowID == 31)
-}
-
-@Test
-@MainActor
 func lengthChangeIsRecorded() {
     let statusItem = MockStatusItem()
 
