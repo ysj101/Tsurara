@@ -17,7 +17,7 @@ final class CGWindowMenuBarItemWindowLister: MenuBarItemWindowListing {
         }
 
         let statusLevel = CGWindowLevelForKey(.statusWindow)
-        let displays = Self.cgScreenFrames()
+        let displays = AppKitScreenGeometry.cgFrames
         return dictionaries.compactMap { dictionary in
             guard
                 let layer = (dictionary[kCGWindowLayer as String] as? NSNumber)?.int32Value,
@@ -40,19 +40,6 @@ final class CGWindowMenuBarItemWindowLister: MenuBarItemWindowListing {
                     name: dictionary[kCGWindowOwnerName as String] as? String ?? ""
                 ),
                 displayFrame: displayFrame
-            )
-        }
-    }
-
-    /// NSScreen の左下原点から CGWindow の主画面左上原点へ変換する。
-    private static func cgScreenFrames() -> [CGRect] {
-        guard let primaryMaxY = NSScreen.screens.first?.frame.maxY else { return [] }
-        return NSScreen.screens.map { screen in
-            CGRect(
-                x: screen.frame.minX,
-                y: primaryMaxY - screen.frame.maxY,
-                width: screen.frame.width,
-                height: screen.frame.height
             )
         }
     }

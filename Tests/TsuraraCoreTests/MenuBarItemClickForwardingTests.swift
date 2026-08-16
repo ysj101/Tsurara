@@ -6,7 +6,7 @@ import TsuraraCore
 @MainActor
 private final class StubClickWindowLister: MenuBarItemWindowListing {
     var snapshots: [[MenuBarItemWindow]]
-    private var callCount = 0
+    private(set) var callCount = 0
 
     init(windows: [MenuBarItemWindow]) {
         snapshots = [windows]
@@ -94,7 +94,9 @@ private func clickWindow(
 private func clickItem(
     id: CGWindowID = 42,
     frame: CGRect,
-    ownerPID: pid_t = 123
+    sourceFrame: CGRect? = nil,
+    ownerPID: pid_t = 123,
+    order: Int = 0
 ) -> ImagedMenuBarItem {
     ImagedMenuBarItem(
         windowID: id,
@@ -114,10 +116,15 @@ private func clickItem(
             intent: .defaultIntent
         )!,
         frame: frame,
+        sourceFrame: sourceFrame,
         owner: MenuBarItemOwner(processIdentifier: ownerPID, name: "Example"),
-        order: 0
+        order: order
     )
 }
+
+private let clickDisplayFrames = [
+    CGRect(x: -1_000, y: 0, width: 3_000, height: 1_080)
+]
 
 @Suite
 @MainActor
@@ -131,9 +138,20 @@ struct MenuBarItemClickForwardingTests {
         let controller = MenuBarItemClickForwardingController(
             windowLister: StubClickWindowLister(
                 snapshots: [[
+                    clickWindow(
+                        id: 7,
+                        frame: CGRect(x: -120, y: 0, width: 20, height: 24)
+                    ),
                     clickWindow(frame: CGRect(x: -80, y: 0, width: 24, height: 24))
                 ], [
-                    clickWindow(frame: CGRect(x: 400, y: 0, width: 24, height: 24))
+                    clickWindow(
+                        id: 8,
+                        frame: CGRect(x: 350, y: 0, width: 20, height: 24)
+                    ),
+                    clickWindow(
+                        id: 99,
+                        frame: CGRect(x: 400, y: 0, width: 24, height: 24)
+                    )
                 ]]
             ),
             positioner: positioner,
@@ -142,8 +160,14 @@ struct MenuBarItemClickForwardingTests {
         )
 
         try await controller.forwardClick(
-            on: clickItem(frame: CGRect(x: -80, y: 0, width: 24, height: 24)),
-            button: .left
+            on: clickItem(
+                frame: CGRect(x: 400, y: 0, width: 24, height: 24),
+                sourceFrame: CGRect(x: -80, y: 0, width: 24, height: 24)
+            ),
+            button: .left,
+            mainDividerFrame: CGRect(x: -50, y: 0, width: 20, height: 24),
+            subDividerFrame: nil,
+            displayFrames: clickDisplayFrames
         )
 
         #expect(positioner.preparedWindowIDs == [42])
@@ -172,13 +196,47 @@ struct MenuBarItemClickForwardingTests {
 
         try await controller.forwardClick(
             on: clickItem(frame: CGRect(x: 100, y: 2, width: 20, height: 22)),
-            button: .right
+            button: .right,
+            mainDividerFrame: CGRect(x: 130, y: 0, width: 20, height: 24),
+            subDividerFrame: nil,
+            displayFrames: clickDisplayFrames
         )
 
         #expect(sender.clicks == [
             .init(point: CGPoint(x: 110, y: 13), button: .right, ownerPID: 123)
         ])
         #expect(positioner.restoreCount == 0)
+    }
+
+    @Test
+    func usesCapturedOrderToBreakEqualDistanceForSameOwner() async throws {
+        let positioner = StubClickPositioner()
+        let sender = StubClickSender()
+        let lister = StubClickWindowLister(windows: [
+            clickWindow(id: 41, frame: CGRect(x: 80, y: 0, width: 20, height: 24)),
+            clickWindow(id: 42, frame: CGRect(x: 120, y: 0, width: 20, height: 24))
+        ])
+        let controller = MenuBarItemClickForwardingController(
+            windowLister: lister,
+            positioner: positioner,
+            clickSender: sender,
+            interfaceTracker: StubInterfaceTracker()
+        )
+
+        try await controller.forwardClick(
+            on: clickItem(
+                frame: CGRect(x: 100, y: 0, width: 20, height: 24),
+                order: 1
+            ),
+            button: .left,
+            mainDividerFrame: CGRect(x: 150, y: 0, width: 20, height: 24),
+            subDividerFrame: nil,
+            displayFrames: clickDisplayFrames
+        )
+
+        #expect(positioner.preparedWindowIDs == [42])
+        #expect(sender.clicks.map(\.point.x) == [130])
+        #expect(lister.callCount == 1)
     }
 
     @Test
@@ -201,7 +259,10 @@ struct MenuBarItemClickForwardingTests {
         await #expect(throws: SendFailure.self) {
             try await controller.forwardClick(
                 on: clickItem(frame: CGRect(x: -100, y: 0, width: 20, height: 20)),
-                button: .left
+                button: .left,
+                mainDividerFrame: CGRect(x: 130, y: 0, width: 20, height: 24),
+                subDividerFrame: nil,
+                displayFrames: clickDisplayFrames
             )
         }
 
@@ -229,8 +290,14 @@ struct MenuBarItemClickForwardingTests {
 
         await #expect(throws: CancellationError.self) {
             try await controller.forwardClick(
-                on: clickItem(frame: CGRect(x: 100, y: 0, width: 20, height: 20)),
-                button: .left
+                on: clickItem(
+                    frame: CGRect(x: 100, y: 0, width: 20, height: 20),
+                    sourceFrame: CGRect(x: -100, y: 0, width: 20, height: 20)
+                ),
+                button: .left,
+                mainDividerFrame: CGRect(x: -50, y: 0, width: 20, height: 24),
+                subDividerFrame: nil,
+                displayFrames: clickDisplayFrames
             )
         }
 
@@ -252,11 +319,14 @@ struct MenuBarItemClickForwardingTests {
         )
 
         await #expect(
-            throws: MenuBarItemClickForwardingError.windowNotFound(windowID: 42)
+            throws: MenuBarItemClickForwardingError.itemNotFound(ownerPID: 123)
         ) {
             try await controller.forwardClick(
                 on: clickItem(frame: CGRect(x: -100, y: 0, width: 20, height: 20)),
-                button: .left
+                button: .left,
+                mainDividerFrame: CGRect(x: -50, y: 0, width: 20, height: 24),
+                subDividerFrame: nil,
+                displayFrames: clickDisplayFrames
             )
         }
 

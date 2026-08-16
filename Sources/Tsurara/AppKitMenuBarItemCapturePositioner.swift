@@ -13,7 +13,7 @@ final class AppKitMenuBarItemCapturePositioner: MenuBarItemCapturePositioning {
         screenFrames: (() -> [CGRect])? = nil
     ) {
         self.sectionManager = sectionManager
-        self.screenFrames = screenFrames ?? Self.cgScreenFrames
+        self.screenFrames = screenFrames ?? { AppKitScreenGeometry.cgFrames }
     }
 
     func prepareForCapture(of windows: [MenuBarItemWindow]) -> Bool {
@@ -35,18 +35,5 @@ final class AppKitMenuBarItemCapturePositioner: MenuBarItemCapturePositioning {
 
     private func isVisibleOnMenuBar(_ window: MenuBarItemWindow) -> Bool {
         window.isVisibleOnMenuBar(displayFrames: screenFrames())
-    }
-
-    /// NSScreen は左下原点、CGWindow は主画面左上原点なので y を反転する。
-    private static func cgScreenFrames() -> [CGRect] {
-        guard let primaryMaxY = NSScreen.screens.first?.frame.maxY else { return [] }
-        return NSScreen.screens.map { screen in
-            CGRect(
-                x: screen.frame.minX,
-                y: primaryMaxY - screen.frame.maxY,
-                width: screen.frame.width,
-                height: screen.frame.height
-            )
-        }
     }
 }

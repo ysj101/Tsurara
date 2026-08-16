@@ -104,7 +104,29 @@ final class SubBarCoordinator {
                 forwardingTask = nil
             }
             do {
-                try await clickForwarder.forwardClick(on: item, button: button)
+                guard let mainDivider =
+                    manager.hiddenSection.dividerItem as? DividerFrameProviding
+                else {
+                    NSLog("クリック転送を中止: メイン区切りが座標取得に対応していません")
+                    throw MenuBarItemClickForwardingError.itemNotFound(
+                        ownerPID: item.owner.processIdentifier
+                    )
+                }
+                guard let mainDividerFrame = mainDivider.dividerFrame else {
+                    NSLog("クリック転送を中止: メイン区切りの button/window/screen が未確定です")
+                    throw MenuBarItemClickForwardingError.itemNotFound(
+                        ownerPID: item.owner.processIdentifier
+                    )
+                }
+                let subDividerFrame =
+                    (manager.alwaysHiddenSection.dividerItem as? DividerFrameProviding)?.dividerFrame
+                try await clickForwarder.forwardClick(
+                    on: item,
+                    button: button,
+                    mainDividerFrame: mainDividerFrame,
+                    subDividerFrame: subDividerFrame,
+                    displayFrames: AppKitScreenGeometry.cgFrames
+                )
             } catch is CancellationError {
                 // Core 側の defer が区切りを復元する。終了時の警告は不要。
             } catch {
@@ -126,17 +148,24 @@ final class SubBarCoordinator {
             }
             do {
                 guard
-                    let mainDivider = manager.hiddenSection.dividerItem as? AppKitStatusItem,
-                    let mainDividerWindowID = mainDivider.windowID
+                    let mainDivider =
+                        manager.hiddenSection.dividerItem as? DividerFrameProviding
                 else {
+                    NSLog("サブバー撮像を中止: メイン区切りが座標取得に対応していません")
                     closeSubBar(generation: generation, cancelCapture: false)
                     return
                 }
-                let subDividerWindowID =
-                    (manager.alwaysHiddenSection.dividerItem as? AppKitStatusItem)?.windowID
+                guard let mainDividerFrame = mainDivider.dividerFrame else {
+                    NSLog("サブバー撮像を中止: メイン区切りの button/window/screen が未確定です")
+                    closeSubBar(generation: generation, cancelCapture: false)
+                    return
+                }
+                let subDividerFrame =
+                    (manager.alwaysHiddenSection.dividerItem as? DividerFrameProviding)?.dividerFrame
                 let items = try await imager.captureHiddenItems(
-                    mainDividerWindowID: mainDividerWindowID,
-                    subDividerWindowID: subDividerWindowID
+                    mainDividerFrame: mainDividerFrame,
+                    subDividerFrame: subDividerFrame,
+                    displayFrames: AppKitScreenGeometry.cgFrames
                 )
                 guard !Task.isCancelled else { return }
                 guard presentationController.ownsCycle(generation) else { return }

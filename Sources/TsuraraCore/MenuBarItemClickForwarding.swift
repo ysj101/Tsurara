@@ -7,7 +7,7 @@ public enum MenuBarItemClickButton: Equatable, Sendable {
 }
 
 public enum MenuBarItemClickForwardingError: Error, Equatable {
-    case windowNotFound(windowID: CGWindowID)
+    case itemNotFound(ownerPID: pid_t)
 }
 
 /// Core の転送フローから CGEvent の生成・送出を分離する境界。
@@ -32,7 +32,10 @@ public protocol MenuBarItemInterfaceTracking: AnyObject {
 public protocol MenuBarItemClickForwarding: AnyObject {
     func forwardClick(
         on item: ImagedMenuBarItem,
-        button: MenuBarItemClickButton
+        button: MenuBarItemClickButton,
+        mainDividerFrame: CGRect,
+        subDividerFrame: CGRect?,
+        displayFrames: [CGRect]
     ) async throws
 }
 
@@ -42,8 +45,8 @@ public protocol MenuBarItemClickForwarding: AnyObject {
 /// CGEvent を送り、クリック後に新しく現れた同一 owner のウィンドウが消えるまで
 /// 再非表示を遅延させる方式を採っている。Accessibility の AXPress は実装ごとの
 /// accessibility tree 品質に左右され、CGWindowID から AXUIElement を一意に得る
-/// 公開 API もないため、既に撮像結果が保持する windowID/frame を活用できる同方式を
-/// 採用する。
+/// 公開 API もないため、区切り座標・owner・撮像時 frame で対象を幾何的に再特定し、
+/// 現在位置へ CGEvent を送る方式を採用する。
 @MainActor
 public final class MenuBarItemClickForwardingController:
     MenuBarItemClickForwarding
@@ -67,7 +70,10 @@ public final class MenuBarItemClickForwardingController:
 
     public func forwardClick(
         on item: ImagedMenuBarItem,
-        button: MenuBarItemClickButton
+        button: MenuBarItemClickButton,
+        mainDividerFrame: CGRect,
+        subDividerFrame: CGRect?,
+        displayFrames: [CGRect]
     ) async throws {
         var didReposition = false
         defer {
@@ -76,28 +82,48 @@ public final class MenuBarItemClickForwardingController:
             }
         }
 
-        // ImagedMenuBarItem.frame は撮像の一時展開中の座標になり得る。クリック時点の
-        // 画面外／画面内判定には使わず、まず WindowServer の現在値を取得する。
-        guard let windowBeforeRepositioning = try windowLister
-            .listMenuBarItemWindows()
-            .first(where: { $0.windowID == item.windowID })
+        // sourceFrame は撮像用に区切りを展開する前の座標。同じ区切り条件で現在の
+        // hidden セクションを作り、owner と幾何距離で対象を再特定する。
+        let listedWindows = try windowLister.listMenuBarItemWindows()
+        let sectionWindows = MenuBarItemSectionGeometry.hiddenWindows(
+            in: listedWindows,
+            mainDividerFrame: mainDividerFrame,
+            subDividerFrame: subDividerFrame,
+            displayFrames: displayFrames
+        )
+        guard let windowBeforeRepositioning = closestWindow(
+            to: item.sourceFrame,
+            ownerPID: item.owner.processIdentifier,
+            preferredOrder: item.order,
+            in: sectionWindows
+        )
         else {
-            throw MenuBarItemClickForwardingError.windowNotFound(
-                windowID: item.windowID
+            throw MenuBarItemClickForwardingError.itemNotFound(
+                ownerPID: item.owner.processIdentifier
             )
         }
         didReposition = positioner.prepareForCapture(
             of: [windowBeforeRepositioning]
         )
 
-        // length の変更有無にかかわらず再列挙し、prepare 後の確定座標へ送る。
-        // windowID は同じ WindowServer ウィンドウを追跡する。
-        guard let currentWindow = try windowLister.listMenuBarItemWindows()
-            .first(where: { $0.windowID == item.windowID })
-        else {
-            throw MenuBarItemClickForwardingError.windowNotFound(
-                windowID: item.windowID
-            )
+        // 一時展開しなかった場合は初回列挙を再利用する。展開した場合だけ再列挙し、
+        // 撮像も同じ展開状態で記録した frame に最も近い同一 owner の項目を選ぶ。
+        // windowID の継続性には依存しない。
+        let currentWindow: MenuBarItemWindow
+        if didReposition {
+            guard let refreshedWindow = closestWindow(
+                to: item.frame,
+                ownerPID: item.owner.processIdentifier,
+                preferredOrder: item.order,
+                in: try windowLister.listMenuBarItemWindows()
+            ) else {
+                throw MenuBarItemClickForwardingError.itemNotFound(
+                    ownerPID: item.owner.processIdentifier
+                )
+            }
+            currentWindow = refreshedWindow
+        } else {
+            currentWindow = windowBeforeRepositioning
         }
 
         interfaceTracker.prepareForClick(
@@ -110,5 +136,45 @@ public final class MenuBarItemClickForwardingController:
         )
 
         try await interfaceTracker.waitUntilInterfaceDismissed()
+    }
+
+    private func closestWindow(
+        to frame: CGRect,
+        ownerPID: pid_t,
+        preferredOrder: Int,
+        in windows: [MenuBarItemWindow]
+    ) -> MenuBarItemWindow? {
+        // 同一 owner の複数項目が幾何的に等距離でも、撮像時の相対順序で
+        // 同じ項目を選び、最後は windowID で結果を決定的にする。
+        let closest = windows
+            .sorted {
+                if $0.frame.minX == $1.frame.minX {
+                    return $0.windowID < $1.windowID
+                }
+                return $0.frame.minX < $1.frame.minX
+            }
+            .enumerated()
+            .filter { $0.element.owner.processIdentifier == ownerPID }
+            .min { lhs, rhs in
+                let lhsDistance = geometryDistance(lhs.element.frame, frame)
+                let rhsDistance = geometryDistance(rhs.element.frame, frame)
+                if lhsDistance != rhsDistance { return lhsDistance < rhsDistance }
+
+                let lhsOrderDistance = abs(lhs.offset - preferredOrder)
+                let rhsOrderDistance = abs(rhs.offset - preferredOrder)
+                if lhsOrderDistance != rhsOrderDistance {
+                    return lhsOrderDistance < rhsOrderDistance
+                }
+                return lhs.element.windowID < rhs.element.windowID
+            }
+        return closest?.element
+    }
+
+    private func geometryDistance(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
+        let dx = lhs.midX - rhs.midX
+        let dy = lhs.midY - rhs.midY
+        let dw = lhs.width - rhs.width
+        let dh = lhs.height - rhs.height
+        return dx * dx + dy * dy + dw * dw + dh * dh
     }
 }
