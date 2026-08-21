@@ -55,17 +55,26 @@ public final class MenuBarItemClickForwardingController:
     private let positioner: any MenuBarItemCapturePositioning
     private let clickSender: any MenuBarItemClickSending
     private let interfaceTracker: any MenuBarItemInterfaceTracking
+    private let repositionWaiter: MenuBarItemRepositionWaiter
 
     public init(
         windowLister: any MenuBarItemWindowListing,
         positioner: any MenuBarItemCapturePositioning,
         clickSender: any MenuBarItemClickSending,
-        interfaceTracker: any MenuBarItemInterfaceTracking
+        interfaceTracker: any MenuBarItemInterfaceTracking,
+        repositionPollInterval: Duration = .milliseconds(20),
+        repositionPollLimit: Int = 25
     ) {
         self.windowLister = windowLister
         self.positioner = positioner
         self.clickSender = clickSender
         self.interfaceTracker = interfaceTracker
+        self.repositionWaiter = MenuBarItemRepositionWaiter(
+            windowLister: windowLister,
+            positioner: positioner,
+            pollInterval: repositionPollInterval,
+            pollLimit: repositionPollLimit
+        )
     }
 
     public func forwardClick(
@@ -106,17 +115,22 @@ public final class MenuBarItemClickForwardingController:
             of: [windowBeforeRepositioning]
         )
 
-        // 一時展開しなかった場合は初回列挙を再利用する。展開した場合だけ再列挙し、
-        // 撮像も同じ展開状態で記録した frame に最も近い同一 owner の項目を選ぶ。
-        // windowID の継続性には依存しない。
+        // 一時展開しなかった場合は初回列挙を再利用する。展開した場合だけ再列挙を
+        // 繰り返し、撮像も同じ展開状態で記録した frame に最も近い同一 owner の
+        // 項目を選ぶ。windowID の継続性には依存しない。
         let currentWindow: MenuBarItemWindow
         if didReposition {
-            guard let refreshedWindow = closestWindow(
-                to: item.frame,
-                ownerPID: item.owner.processIdentifier,
-                preferredOrder: item.order,
-                in: try windowLister.listMenuBarItemWindows()
-            ) else {
+            let readyWindow = try await repositionWaiter.waitUntilReady { windows in
+                self.closestWindow(
+                    to: item.frame,
+                    ownerPID: item.owner.processIdentifier,
+                    preferredOrder: item.order,
+                    in: windows
+                )
+            }
+            guard let refreshedWindow = readyWindow else {
+                // stale frame への CGEvent は別の項目を誤操作し得るため、
+                // 再特定できない場合と同じ itemNotFound として安全に中止する。
                 throw MenuBarItemClickForwardingError.itemNotFound(
                     ownerPID: item.owner.processIdentifier
                 )

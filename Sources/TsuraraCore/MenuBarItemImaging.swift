@@ -129,6 +129,57 @@ public extension MenuBarItemCapturePositioning {
 }
 
 @MainActor
+struct MenuBarItemRepositionWaiter {
+    private let windowLister: any MenuBarItemWindowListing
+    private let positioner: any MenuBarItemCapturePositioning
+    private let pollInterval: Duration
+    private let pollLimit: Int
+
+    init(
+        windowLister: any MenuBarItemWindowListing,
+        positioner: any MenuBarItemCapturePositioning,
+        pollInterval: Duration,
+        pollLimit: Int
+    ) {
+        self.windowLister = windowLister
+        self.positioner = positioner
+        self.pollInterval = pollInterval
+        self.pollLimit = max(1, pollLimit)
+    }
+
+    func waitUntilReady(
+        resolvingWindows resolve: ([MenuBarItemWindow]) -> [MenuBarItemWindow]
+    ) async throws -> [MenuBarItemWindow] {
+        var refreshed: [MenuBarItemWindow] = []
+        for attempt in 0..<pollLimit {
+            try Task.checkCancellation()
+            refreshed = resolve(try windowLister.listMenuBarItemWindows())
+            // 再配置中は対象が一瞬だけ列挙から消えることがある。空の結果を
+            // 「全員準備完了」とみなすと待ち合わせが即座に打ち切られるため、
+            // 1件以上そろって初めて完了とする。
+            if !refreshed.isEmpty,
+               refreshed.allSatisfy(positioner.isReadyForCapture) {
+                return refreshed
+            }
+            if attempt + 1 < pollLimit {
+                try await Task.sleep(for: pollInterval)
+            }
+        }
+        // タイムアウト時は、準備できた項目だけを部分的な結果として返す。
+        return refreshed.filter(positioner.isReadyForCapture)
+    }
+
+    /// 対象が 1 件だけの経路（クリック転送）向けの糖衣。
+    func waitUntilReady(
+        resolvingWindow resolve: ([MenuBarItemWindow]) -> MenuBarItemWindow?
+    ) async throws -> MenuBarItemWindow? {
+        try await waitUntilReady { windows in
+            resolve(windows).map { [$0] } ?? []
+        }.first
+    }
+}
+
+@MainActor
 private final class NoopMenuBarItemCapturePositioner: MenuBarItemCapturePositioning {
     func prepareForCapture(of windows: [MenuBarItemWindow]) -> Bool { false }
     func restoreAfterCapture() {}
@@ -140,8 +191,7 @@ public final class MenuBarItemImager {
     private let windowLister: any MenuBarItemWindowListing
     private let imageCapturer: any MenuBarItemImageCapturing
     private let capturePositioner: any MenuBarItemCapturePositioning
-    private let repositionPollInterval: Duration
-    private let repositionPollLimit: Int
+    private let repositionWaiter: MenuBarItemRepositionWaiter
     private var isCapturing = false
 
     public init(
@@ -154,8 +204,12 @@ public final class MenuBarItemImager {
         self.windowLister = windowLister
         self.imageCapturer = imageCapturer
         self.capturePositioner = capturePositioner ?? NoopMenuBarItemCapturePositioner()
-        self.repositionPollInterval = repositionPollInterval
-        self.repositionPollLimit = max(1, repositionPollLimit)
+        self.repositionWaiter = MenuBarItemRepositionWaiter(
+            windowLister: windowLister,
+            positioner: self.capturePositioner,
+            pollInterval: repositionPollInterval,
+            pollLimit: repositionPollLimit
+        )
     }
 
     public func captureHiddenItems(
@@ -192,32 +246,16 @@ public final class MenuBarItemImager {
         }
 
         if repositioned {
-            targets = try await waitForRepositionedWindows(targets)
+            targets = try await repositionWaiter.waitUntilReady { windows in
+                let refreshedByID = Dictionary(
+                    windows.map { ($0.windowID, $0) },
+                    uniquingKeysWith: { _, latest in latest }
+                )
+                // 再列挙から消えたウィンドウは stale frame へフォールバックしない。
+                return targets.compactMap { refreshedByID[$0.windowID] }
+            }
         }
         return try await capture(targets, sourceFramesByID: sourceFramesByID)
-    }
-
-    private func waitForRepositionedWindows(
-        _ targets: [MenuBarItemWindow]
-    ) async throws -> [MenuBarItemWindow] {
-        var refreshed: [MenuBarItemWindow] = []
-        for attempt in 0..<repositionPollLimit {
-            try Task.checkCancellation()
-            let refreshedByID = Dictionary(
-                try windowLister.listMenuBarItemWindows().map { ($0.windowID, $0) },
-                uniquingKeysWith: { _, latest in latest }
-            )
-            // 再列挙から消えたウィンドウは stale frame へフォールバックしない。
-            refreshed = targets.compactMap { refreshedByID[$0.windowID] }
-            if refreshed.allSatisfy(capturePositioner.isReadyForCapture) {
-                return refreshed
-            }
-            if attempt + 1 < repositionPollLimit {
-                try await Task.sleep(for: repositionPollInterval)
-            }
-        }
-        // タイムアウト時も、準備できた項目は部分成功として撮像する。
-        return refreshed.filter(capturePositioner.isReadyForCapture)
     }
 
     private func capture(

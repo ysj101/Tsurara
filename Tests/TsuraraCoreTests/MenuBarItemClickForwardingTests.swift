@@ -25,12 +25,19 @@ private final class StubClickWindowLister: MenuBarItemWindowListing {
 @MainActor
 private final class StubClickPositioner: MenuBarItemCapturePositioning {
     var didReposition = false
+    var readyOnCheck: Int?
     private(set) var preparedWindowIDs: [CGWindowID] = []
+    private(set) var readinessCheckCount = 0
     private(set) var restoreCount = 0
 
     func prepareForCapture(of windows: [MenuBarItemWindow]) -> Bool {
         preparedWindowIDs = windows.map(\.windowID)
         return didReposition
+    }
+
+    func isReadyForCapture(_ window: MenuBarItemWindow) -> Bool {
+        readinessCheckCount += 1
+        return readyOnCheck.map { readinessCheckCount >= $0 } ?? true
     }
 
     func restoreAfterCapture() {
@@ -176,6 +183,133 @@ struct MenuBarItemClickForwardingTests {
         ])
         #expect(tracker.preparedOwnerPIDs == [123])
         #expect(tracker.waitCount == 1)
+        #expect(positioner.restoreCount == 1)
+    }
+
+    @Test
+    func pollsUntilRepositionedTargetIsReadyBeforeClicking() async throws {
+        let positioner = StubClickPositioner()
+        positioner.didReposition = true
+        positioner.readyOnCheck = 3
+        let sender = StubClickSender()
+        let lister = StubClickWindowLister(snapshots: [[
+            clickWindow(frame: CGRect(x: -100, y: 0, width: 20, height: 24))
+        ], [
+            clickWindow(frame: CGRect(x: -60, y: 0, width: 20, height: 24))
+        ], [
+            clickWindow(frame: CGRect(x: -20, y: 0, width: 20, height: 24))
+        ], [
+            clickWindow(frame: CGRect(x: 400, y: 0, width: 20, height: 24))
+        ]])
+        let controller = MenuBarItemClickForwardingController(
+            windowLister: lister,
+            positioner: positioner,
+            clickSender: sender,
+            interfaceTracker: StubInterfaceTracker(),
+            repositionPollInterval: .zero,
+            repositionPollLimit: 3
+        )
+
+        try await controller.forwardClick(
+            on: clickItem(
+                frame: CGRect(x: 400, y: 0, width: 20, height: 24),
+                sourceFrame: CGRect(x: -100, y: 0, width: 20, height: 24)
+            ),
+            button: .left,
+            mainDividerFrame: CGRect(x: -50, y: 0, width: 20, height: 24),
+            subDividerFrame: nil,
+            displayFrames: clickDisplayFrames
+        )
+
+        #expect(lister.callCount == 4)
+        #expect(positioner.readinessCheckCount == 3)
+        #expect(sender.clicks == [
+            .init(point: CGPoint(x: 410, y: 12), button: .left, ownerPID: 123)
+        ])
+        #expect(positioner.restoreCount == 1)
+    }
+
+    @Test
+    func doesNotClickWhenRepositioningNeverBecomesReady() async {
+        let positioner = StubClickPositioner()
+        positioner.didReposition = true
+        positioner.readyOnCheck = .max
+        let sender = StubClickSender()
+        let controller = MenuBarItemClickForwardingController(
+            windowLister: StubClickWindowLister(
+                windows: [
+                    clickWindow(frame: CGRect(x: -100, y: 0, width: 20, height: 24))
+                ]
+            ),
+            positioner: positioner,
+            clickSender: sender,
+            interfaceTracker: StubInterfaceTracker(),
+            repositionPollInterval: .zero,
+            repositionPollLimit: 3
+        )
+
+        await #expect(
+            throws: MenuBarItemClickForwardingError.itemNotFound(ownerPID: 123)
+        ) {
+            try await controller.forwardClick(
+                on: clickItem(
+                    frame: CGRect(x: 400, y: 0, width: 20, height: 24),
+                    sourceFrame: CGRect(x: -100, y: 0, width: 20, height: 24)
+                ),
+                button: .left,
+                mainDividerFrame: CGRect(x: -50, y: 0, width: 20, height: 24),
+                subDividerFrame: nil,
+                displayFrames: clickDisplayFrames
+            )
+        }
+
+        // 上限まで待ってから諦めたことだけを見る（最後の部分結果の絞り込みで
+        // もう一度判定されるため、厳密な回数には依存しない）。
+        #expect(positioner.readinessCheckCount >= 3)
+        #expect(sender.clicks.isEmpty)
+        #expect(positioner.restoreCount == 1)
+    }
+
+    @Test
+    func keepsPollingWhileRepositionedTargetIsMissingFromTheWindowList() async throws {
+        let positioner = StubClickPositioner()
+        positioner.didReposition = true
+        let sender = StubClickSender()
+        let lister = StubClickWindowLister(snapshots: [[
+            clickWindow(frame: CGRect(x: -100, y: 0, width: 20, height: 24))
+        ], [
+            // 再配置の途中で対象が一瞬だけ列挙から消えるケース。
+            clickWindow(
+                id: 99,
+                frame: CGRect(x: 200, y: 0, width: 20, height: 24),
+                ownerPID: 999
+            )
+        ], [
+            clickWindow(frame: CGRect(x: 400, y: 0, width: 20, height: 24))
+        ]])
+        let controller = MenuBarItemClickForwardingController(
+            windowLister: lister,
+            positioner: positioner,
+            clickSender: sender,
+            interfaceTracker: StubInterfaceTracker(),
+            repositionPollInterval: .zero,
+            repositionPollLimit: 3
+        )
+
+        try await controller.forwardClick(
+            on: clickItem(
+                frame: CGRect(x: 400, y: 0, width: 20, height: 24),
+                sourceFrame: CGRect(x: -100, y: 0, width: 20, height: 24)
+            ),
+            button: .left,
+            mainDividerFrame: CGRect(x: -50, y: 0, width: 20, height: 24),
+            subDividerFrame: nil,
+            displayFrames: clickDisplayFrames
+        )
+
+        #expect(sender.clicks == [
+            .init(point: CGPoint(x: 410, y: 12), button: .left, ownerPID: 123)
+        ])
         #expect(positioner.restoreCount == 1)
     }
 
