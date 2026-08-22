@@ -8,12 +8,23 @@ import TsuraraCore
 @MainActor
 final class ScreenCaptureKitMenuBarAreaMasker: MenuBarCaptureAreaMasking {
     private let logger = Logger(subsystem: "com.ysj.Tsurara", category: "capture")
+    // WindowServer が length 変更を反映するまでの猶予。実測に基づく経験値で、
+    // 展開側は 20ms 間隔で最大 25 回待つ既存の再配置待ちも踏まえている。
+    private let maskCommitDelay: Duration = .milliseconds(32)
+    private let unmaskDelay: Duration = .milliseconds(150)
     private var panel: NSPanel?
 
     func beginMasking(area: CGRect) async -> Bool {
         // 前回のパネルが万一残っていても、古い画面構成の位置へ表示し続けない。
         endMasking()
 
+        guard let primaryMaxY = NSScreen.screens.first?.frame.maxY else {
+            logger.error("AppKit 座標へ変換するための主画面が見つかりません")
+            return false
+        }
+
+        // 項目撮像用の共有可能コンテンツは、一時展開後の位置でウィンドウを
+        // 解決する必要がある。展開前の帯を撮るこの列挙とは統合できない。
         do {
             let content = try await SCShareableContent.excludingDesktopWindows(
                 true,
@@ -71,10 +82,6 @@ final class ScreenCaptureKitMenuBarAreaMasker: MenuBarCaptureAreaMasking {
                 logger.error("撮像マスク画像から対象領域を切り出せませんでした")
                 return false
             }
-            guard let primaryMaxY = NSScreen.screens.first?.frame.maxY else {
-                logger.error("AppKit 座標へ変換するための主画面が見つかりません")
-                return false
-            }
 
             let panelFrame = CGWindowCoordinateSpace.frame(
                 toAppKit: area,
@@ -106,6 +113,7 @@ final class ScreenCaptureKitMenuBarAreaMasker: MenuBarCaptureAreaMasking {
             panel.contentView = imageView
             panel.orderFrontRegardless()
             self.panel = panel
+            try? await Task.sleep(for: maskCommitDelay)
             return true
         } catch is CancellationError {
             return false
@@ -117,8 +125,13 @@ final class ScreenCaptureKitMenuBarAreaMasker: MenuBarCaptureAreaMasking {
     }
 
     func endMasking() {
-        panel?.orderOut(nil)
-        panel = nil
+        guard let panel else { return }
+        self.panel = nil
+        let delay = unmaskDelay
+        Task { @MainActor in
+            try? await Task.sleep(for: delay)
+            panel.orderOut(nil)
+        }
     }
 
     private func intersectionArea(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
