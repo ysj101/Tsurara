@@ -18,7 +18,9 @@ build:
 app:
 	Scripts/make-app.sh
 
-run: app
+# open は起動中のアプリがあると再起動せず既存プロセスを前面に出すだけなので、
+# 新しいビルドを確実に反映させるため先に終了させる。
+run: app stop
 	open build/Tsurara.app
 
 stop:

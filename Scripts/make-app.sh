@@ -21,7 +21,18 @@ fi
 plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP_DIR/Contents/Info.plist"
 
 # SMAppService（ログイン時起動）はバンドル全体の署名を要求するため、
-# 手動ビルドでは ad-hoc 署名を付与する。
-codesign --force --sign - "$APP_DIR"
+# 手動ビルドでも署名を付与する。
+#
+# ad-hoc 署名の designated requirement は cdhash だけで構成されるため、再ビルドの
+# たびに TCC からは別アプリと見なされ、アクセシビリティと画面収録の許可が失われる。
+# 安定した署名 ID があれば、それで署名して許可を再ビルドをまたいで保持する。
+SIGN_IDENTITY=${TSURARA_SIGN_IDENTITY:-Tsurara Dev}
+if security find-identity -v -p codesigning | grep -q "\"$SIGN_IDENTITY\""; then
+    codesign --force --sign "$SIGN_IDENTITY" "$APP_DIR"
+else
+    echo "warning: 署名 ID \"$SIGN_IDENTITY\" が見つからないため ad-hoc 署名する。" >&2
+    echo "warning: 再ビルドのたびにシステム設定での許可をやり直す必要がある。" >&2
+    codesign --force --sign - "$APP_DIR"
+fi
 
 echo "Created $APP_DIR (version $VERSION)"
