@@ -114,9 +114,19 @@ public protocol MenuBarItemImageCapturing: AnyObject {
     func capture(windowIDs: [CGWindowID]) async throws -> [CGWindowID: CGImage]
 }
 
+/// 撮像用の一時展開で露出する領域を、展開前の見た目で覆う操作の抽象化。
+@MainActor
+public protocol MenuBarCaptureAreaMasking: AnyObject {
+    /// 覆えた場合に true を返す。false の場合、呼び出し側は endMasking を呼ばない。
+    func beginMasking(area: CGRect) async -> Bool
+    func endMasking()
+}
+
 /// 画面外へ押し出された項目を撮像可能な位置へ一時的に戻す操作の抽象化。
 @MainActor
 public protocol MenuBarItemCapturePositioning: AnyObject {
+    /// prepareForCapture が実際に一時展開を行うかを、展開する前に判定する。
+    func needsRepositioning(for windows: [MenuBarItemWindow]) -> Bool
     /// 一時展開の所有権を取得した場合に true を返す。true の場合、呼び出し側は
     /// 再列挙したうえで、処理終了時に restoreAfterCapture を必ず1回呼ぶ。
     func prepareForCapture(of windows: [MenuBarItemWindow]) -> Bool
@@ -125,6 +135,10 @@ public protocol MenuBarItemCapturePositioning: AnyObject {
 }
 
 public extension MenuBarItemCapturePositioning {
+    func needsRepositioning(for windows: [MenuBarItemWindow]) -> Bool {
+        windows.contains { !isReadyForCapture($0) }
+    }
+
     func isReadyForCapture(_ window: MenuBarItemWindow) -> Bool { true }
 }
 
@@ -191,6 +205,7 @@ public final class MenuBarItemImager {
     private let windowLister: any MenuBarItemWindowListing
     private let imageCapturer: any MenuBarItemImageCapturing
     private let capturePositioner: any MenuBarItemCapturePositioning
+    private let areaMasker: (any MenuBarCaptureAreaMasking)?
     private let repositionWaiter: MenuBarItemRepositionWaiter
     private var isCapturing = false
 
@@ -198,12 +213,14 @@ public final class MenuBarItemImager {
         windowLister: any MenuBarItemWindowListing,
         imageCapturer: any MenuBarItemImageCapturing,
         capturePositioner: (any MenuBarItemCapturePositioning)? = nil,
+        areaMasker: (any MenuBarCaptureAreaMasking)? = nil,
         repositionPollInterval: Duration = .milliseconds(20),
         repositionPollLimit: Int = 25
     ) {
         self.windowLister = windowLister
         self.imageCapturer = imageCapturer
         self.capturePositioner = capturePositioner ?? NoopMenuBarItemCapturePositioner()
+        self.areaMasker = areaMasker
         self.repositionWaiter = MenuBarItemRepositionWaiter(
             windowLister: windowLister,
             positioner: self.capturePositioner,
@@ -237,6 +254,26 @@ public final class MenuBarItemImager {
             targets.map { ($0.windowID, $0.frame) },
             uniquingKeysWith: { first, _ in first }
         )
+
+        var didMask = false
+        if let areaMasker,
+           capturePositioner.needsRepositioning(for: targets),
+           let area = MenuBarItemSectionGeometry.captureExpansionArea(
+               mainDividerFrame: mainDividerFrame,
+               displayFrames: displayFrames
+            ) {
+            didMask = await areaMasker.beginMasking(area: area)
+        }
+        // defer は逆順に実行される。先にマスク解除を登録しておくことで、終了時は
+        // 区切りを画面外へ戻してからマスクを外し、一時展開の露出を防ぐ。
+        defer {
+            if didMask {
+                areaMasker?.endMasking()
+            }
+        }
+        // beginMasking の await 中にキャンセルされた場合は、マスクだけを解除して
+        // 区切りを展開せずに終了する。
+        try Task.checkCancellation()
 
         let repositioned = capturePositioner.prepareForCapture(of: targets)
         defer {
@@ -287,6 +324,29 @@ public final class MenuBarItemImager {
 /// macOS 26 で自プロセスの status-level window が列挙されなくても使えるよう、
 /// 区切り自体の windowID ではなく AppKit から得た CG グローバル座標を境界にする。
 enum MenuBarItemSectionGeometry {
+    static func captureExpansionArea(
+        mainDividerFrame: CGRect,
+        displayFrames: [CGRect]
+    ) -> CGRect? {
+        guard let display = displayContainingDivider(
+            mainDividerFrame,
+            among: displayFrames
+        ) else { return nil }
+
+        let width = mainDividerFrame.maxX - display.minX
+        guard width > 0 else { return nil }
+        let area = CGRect(
+            x: display.minX,
+            y: display.minY,
+            width: width,
+            height: max(
+                mainDividerFrame.maxY - display.minY,
+                mainDividerFrame.height
+            )
+        ).intersection(display)
+        return area.isNull ? nil : area
+    }
+
     static func hiddenWindows(
         in windows: [MenuBarItemWindow],
         mainDividerFrame: CGRect,
