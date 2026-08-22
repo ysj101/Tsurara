@@ -31,7 +31,7 @@ final class ScreenCaptureKitMenuBarAreaMasker: MenuBarCaptureAreaMasking {
                 onScreenWindowsOnly: false
             )
             guard let display = content.displays
-                .map({ ($0, intersectionArea(area, $0.frame)) })
+                .map({ ($0, area.intersectionArea(with: $0.frame)) })
                 .filter({ $0.1 > 0 })
                 .max(by: { $0.1 < $1.1 })?.0
             else {
@@ -105,8 +105,8 @@ final class ScreenCaptureKitMenuBarAreaMasker: MenuBarCaptureAreaMasking {
                 .fullScreenAuxiliary,
             ]
 
-            let imageView = NSImageView(frame: panel.contentView?.bounds ?? .zero)
-            imageView.autoresizingMask = [.width, .height]
+            // contentView へ代入すると AppKit が枠へ合わせるため、frame は不要。
+            let imageView = NSImageView()
             imageView.imageScaling = .scaleAxesIndependently
             imageView.animates = false
             imageView.image = NSImage(cgImage: image, size: panelFrame.size)
@@ -127,16 +127,12 @@ final class ScreenCaptureKitMenuBarAreaMasker: MenuBarCaptureAreaMasking {
     func endMasking() {
         guard let panel else { return }
         self.panel = nil
+        // self を捕捉すると masker の寿命を遅延タスクへ引き延ばすため、
+        // 必要な値だけをローカルへ写して渡す。
         let delay = unmaskDelay
         Task { @MainActor in
             try? await Task.sleep(for: delay)
             panel.orderOut(nil)
         }
-    }
-
-    private func intersectionArea(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
-        let intersection = lhs.intersection(rhs)
-        guard !intersection.isNull else { return 0 }
-        return intersection.width * intersection.height
     }
 }
