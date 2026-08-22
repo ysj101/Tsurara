@@ -61,7 +61,7 @@ public struct SubBarPanelLayoutCalculator: SubBarPanelLayoutCalculating {
         // ステータスアイテムと最も広く交差する画面を優先する。画面境界上などで
         // 交差面積がない場合は、アンカー中心から最も近い画面を選ぶ。
         if let intersecting = screens
-            .map({ ($0, intersectionArea(anchorFrame, $0.frame)) })
+            .map({ ($0, anchorFrame.intersectionArea(with: $0.frame)) })
             .filter({ $0.1 > 0 })
             .max(by: { $0.1 < $1.1 })?.0
         {
@@ -73,12 +73,6 @@ public struct SubBarPanelLayoutCalculator: SubBarPanelLayoutCalculating {
             squaredDistance(from: anchorCenter, to: $0.frame)
                 < squaredDistance(from: anchorCenter, to: $1.frame)
         }
-    }
-
-    private func intersectionArea(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
-        let intersection = lhs.intersection(rhs)
-        guard !intersection.isNull else { return 0 }
-        return intersection.width * intersection.height
     }
 
     private func squaredDistance(from point: CGPoint, to rect: CGRect) -> CGFloat {

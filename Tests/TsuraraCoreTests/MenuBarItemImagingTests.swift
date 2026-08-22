@@ -21,6 +21,7 @@ private final class StubMenuBarWindowLister: MenuBarItemWindowListing {
 @MainActor
 private final class StubMenuBarImageCapturer: MenuBarItemImageCapturing {
     var permissionError: Error?
+    var captureError: Error?
     var failedWindowIDs: Set<CGWindowID> = []
     private(set) var capturedWindowIDs: [CGWindowID] = []
     private(set) var captureCallCount = 0
@@ -32,6 +33,7 @@ private final class StubMenuBarImageCapturer: MenuBarItemImageCapturing {
     func capture(windowIDs: [CGWindowID]) async throws -> [CGWindowID: CGImage] {
         captureCallCount += 1
         capturedWindowIDs.append(contentsOf: windowIDs)
+        if let captureError { throw captureError }
         return Dictionary(
             windowIDs.compactMap { windowID in
                 guard !failedWindowIDs.contains(windowID) else { return nil }
@@ -59,16 +61,62 @@ private final class StubMenuBarImageCapturer: MenuBarItemImageCapturing {
 }
 
 @MainActor
+private final class CallOrderLog {
+    private(set) var entries: [String] = []
+
+    func append(_ entry: String) {
+        entries.append(entry)
+    }
+}
+
+@MainActor
+private final class StubCaptureAreaMasker: MenuBarCaptureAreaMasking {
+    var beginResult = true
+    var cancelsDuringBegin = false
+    private(set) var areas: [CGRect] = []
+    private(set) var endCallCount = 0
+    private let orderLog: CallOrderLog?
+
+    init(orderLog: CallOrderLog? = nil) {
+        self.orderLog = orderLog
+    }
+
+    func beginMasking(area: CGRect) async -> Bool {
+        areas.append(area)
+        orderLog?.append("beginMasking")
+        if cancelsDuringBegin {
+            withUnsafeCurrentTask { $0?.cancel() }
+        }
+        return beginResult
+    }
+
+    func endMasking() {
+        endCallCount += 1
+        orderLog?.append("endMasking")
+    }
+}
+
+@MainActor
 private final class StubCapturePositioner: MenuBarItemCapturePositioning {
-    var needsRepositioning = false
+    var shouldReposition = false
     var readyWindowIDs: Set<CGWindowID>?
     var readyFrameMinX: CGFloat?
     private(set) var preparedWindows: [MenuBarItemWindow] = []
     private(set) var restoreCallCount = 0
+    private let orderLog: CallOrderLog?
+
+    init(orderLog: CallOrderLog? = nil) {
+        self.orderLog = orderLog
+    }
+
+    func needsRepositioning(for windows: [MenuBarItemWindow]) -> Bool {
+        shouldReposition
+    }
 
     func prepareForCapture(of windows: [MenuBarItemWindow]) -> Bool {
+        orderLog?.append("prepareForCapture")
         preparedWindows = windows
-        return needsRepositioning
+        return shouldReposition
     }
 
     func isReadyForCapture(_ window: MenuBarItemWindow) -> Bool {
@@ -78,6 +126,7 @@ private final class StubCapturePositioner: MenuBarItemCapturePositioning {
 
     func restoreAfterCapture() {
         restoreCallCount += 1
+        orderLog?.append("restoreAfterCapture")
     }
 }
 
@@ -211,7 +260,7 @@ struct MenuBarItemImagingTests {
         let lister = StubMenuBarWindowLister([collapsed, exposed])
         let capturer = StubMenuBarImageCapturer()
         let positioner = StubCapturePositioner()
-        positioner.needsRepositioning = true
+        positioner.shouldReposition = true
         let imager = MenuBarItemImager(
             windowLister: lister,
             imageCapturer: capturer,
@@ -232,13 +281,163 @@ struct MenuBarItemImagingTests {
     }
 
     @Test
+    func masksBeforeExpansionAndUnmasksAfterRestoration() async throws {
+        let display = CGRect(x: 0, y: 0, width: 1_920, height: 1_080)
+        let windows = [window(10, x: 10), window(1, x: 40, width: 20)]
+        let orderLog = CallOrderLog()
+        let positioner = StubCapturePositioner(orderLog: orderLog)
+        positioner.shouldReposition = true
+        let masker = StubCaptureAreaMasker(orderLog: orderLog)
+        let imager = MenuBarItemImager(
+            windowLister: StubMenuBarWindowLister([windows, windows]),
+            imageCapturer: StubMenuBarImageCapturer(),
+            capturePositioner: positioner,
+            areaMasker: masker
+        )
+
+        _ = try await imager.captureHiddenItems(
+            mainDividerFrame: CGRect(x: 40, y: 0, width: 20, height: 24),
+            subDividerFrame: nil,
+            displayFrames: [display]
+        )
+
+        #expect(masker.areas == [CGRect(x: 0, y: 0, width: 60, height: 24)])
+        #expect(orderLog.entries == [
+            "beginMasking",
+            "prepareForCapture",
+            "restoreAfterCapture",
+            "endMasking",
+        ])
+    }
+
+    @Test
+    func doesNotMaskWhenExpansionIsUnnecessary() async throws {
+        let windows = [window(10, x: 10), window(1, x: 40, width: 20)]
+        let masker = StubCaptureAreaMasker()
+        let imager = MenuBarItemImager(
+            windowLister: StubMenuBarWindowLister([windows]),
+            imageCapturer: StubMenuBarImageCapturer(),
+            capturePositioner: StubCapturePositioner(),
+            areaMasker: masker
+        )
+
+        _ = try await imager.captureHiddenItems(
+            mainDividerFrame: CGRect(x: 40, y: 0, width: 20, height: 24),
+            subDividerFrame: nil,
+            displayFrames: [CGRect(x: 0, y: 0, width: 1_920, height: 1_080)]
+        )
+
+        #expect(masker.areas.isEmpty)
+        #expect(masker.endCallCount == 0)
+    }
+
+    @Test
+    func doesNotEndMaskingWhenMaskCouldNotBeShown() async throws {
+        let windows = [window(10, x: 10), window(1, x: 40, width: 20)]
+        let positioner = StubCapturePositioner()
+        positioner.shouldReposition = true
+        let masker = StubCaptureAreaMasker()
+        masker.beginResult = false
+        let imager = MenuBarItemImager(
+            windowLister: StubMenuBarWindowLister([windows, windows]),
+            imageCapturer: StubMenuBarImageCapturer(),
+            capturePositioner: positioner,
+            areaMasker: masker
+        )
+
+        _ = try await imager.captureHiddenItems(
+            mainDividerFrame: CGRect(x: 40, y: 0, width: 20, height: 24),
+            subDividerFrame: nil,
+            displayFrames: [CGRect(x: 0, y: 0, width: 1_920, height: 1_080)]
+        )
+
+        #expect(masker.areas.count == 1)
+        #expect(masker.endCallCount == 0)
+    }
+
+    @Test
+    func cancellationDuringMaskingUnmasksWithoutExpanding() async {
+        let windows = [window(10, x: 10), window(1, x: 40, width: 20)]
+        let positioner = StubCapturePositioner()
+        positioner.shouldReposition = true
+        let masker = StubCaptureAreaMasker()
+        masker.cancelsDuringBegin = true
+        let imager = MenuBarItemImager(
+            windowLister: StubMenuBarWindowLister([windows]),
+            imageCapturer: StubMenuBarImageCapturer(),
+            capturePositioner: positioner,
+            areaMasker: masker
+        )
+
+        let task = Task {
+            try await imager.captureHiddenItems(
+                mainDividerFrame: CGRect(x: 40, y: 0, width: 20, height: 24),
+                subDividerFrame: nil,
+                displayFrames: [CGRect(x: 0, y: 0, width: 1_920, height: 1_080)]
+            )
+        }
+        await #expect(throws: CancellationError.self) {
+            try await task.value
+        }
+        #expect(masker.endCallCount == 1)
+        #expect(positioner.preparedWindows.isEmpty)
+        #expect(positioner.restoreCallCount == 0)
+    }
+
+    @Test
+    func doesNotMaskWhenDividerDisplayCannotBeDetermined() async throws {
+        let windows = [window(10, x: 10), window(1, x: 2_500, width: 20)]
+        let positioner = StubCapturePositioner()
+        positioner.shouldReposition = true
+        let masker = StubCaptureAreaMasker()
+        let imager = MenuBarItemImager(
+            windowLister: StubMenuBarWindowLister([windows, windows]),
+            imageCapturer: StubMenuBarImageCapturer(),
+            capturePositioner: positioner,
+            areaMasker: masker
+        )
+
+        _ = try await imager.captureHiddenItems(
+            mainDividerFrame: CGRect(x: 2_500, y: 0, width: 20, height: 24),
+            subDividerFrame: nil,
+            displayFrames: [CGRect(x: 0, y: 0, width: 1_920, height: 1_080)]
+        )
+
+        #expect(masker.areas.isEmpty)
+        #expect(positioner.preparedWindows.map(\.windowID) == [10])
+    }
+
+    @Test
+    func clipsMaskAreaToDividerDisplay() async throws {
+        let display = CGRect(x: 100, y: 200, width: 1_000, height: 600)
+        let windows = [window(10, x: 450, y: 200), window(1, x: 500, y: 190)]
+        let positioner = StubCapturePositioner()
+        positioner.shouldReposition = true
+        let masker = StubCaptureAreaMasker()
+        let imager = MenuBarItemImager(
+            windowLister: StubMenuBarWindowLister([windows, windows]),
+            imageCapturer: StubMenuBarImageCapturer(),
+            capturePositioner: positioner,
+            areaMasker: masker
+        )
+
+        _ = try await imager.captureHiddenItems(
+            mainDividerFrame: CGRect(x: 500, y: 190, width: 20, height: 50),
+            subDividerFrame: nil,
+            displayFrames: [display]
+        )
+
+        #expect(masker.areas == [CGRect(x: 100, y: 200, width: 420, height: 50)])
+    }
+
+    @Test
     func pollsUntilRepositionedWindowAppearsOnScreen() async throws {
         let collapsed = [window(10, x: -100), window(1, x: -70, width: 100)]
         let moving = [window(10, x: -20), window(1, x: 530)]
         let exposed = [window(10, x: 500), window(1, x: 530)]
         let lister = StubMenuBarWindowLister([collapsed, moving, exposed])
         let positioner = StubCapturePositioner()
-        positioner.needsRepositioning = true
+        positioner.shouldReposition = true
         positioner.readyFrameMinX = 0
         let imager = MenuBarItemImager(
             windowLister: lister,
@@ -268,7 +467,7 @@ struct MenuBarItemImagingTests {
             window(11, x: 400), window(11, x: 500), window(1, x: 530)
         ]
         let positioner = StubCapturePositioner()
-        positioner.needsRepositioning = true
+        positioner.shouldReposition = true
         let imager = MenuBarItemImager(
             windowLister: StubMenuBarWindowLister([initial, refreshed]),
             imageCapturer: StubMenuBarImageCapturer(),
@@ -290,12 +489,14 @@ struct MenuBarItemImagingTests {
         let windows = [window(10, x: -100), window(1, x: -70, width: 100)]
         let lister = StubMenuBarWindowLister([windows])
         let positioner = StubCapturePositioner()
-        positioner.needsRepositioning = true
+        positioner.shouldReposition = true
         positioner.readyWindowIDs = []
+        let masker = StubCaptureAreaMasker()
         let imager = MenuBarItemImager(
             windowLister: lister,
             imageCapturer: StubMenuBarImageCapturer(),
             capturePositioner: positioner,
+            areaMasker: masker,
             repositionPollInterval: .seconds(10),
             repositionPollLimit: 2
         )
@@ -313,6 +514,7 @@ struct MenuBarItemImagingTests {
             try await task.value
         }
         #expect(positioner.restoreCallCount == 1)
+        #expect(masker.endCallCount == 1)
     }
 
     @Test
@@ -320,7 +522,7 @@ struct MenuBarItemImagingTests {
         let windows = [window(10, x: -100), window(1, x: -70, width: 100)]
         let lister = StubMenuBarWindowLister([windows])
         let positioner = StubCapturePositioner()
-        positioner.needsRepositioning = true
+        positioner.shouldReposition = true
         positioner.readyWindowIDs = []
         let imager = MenuBarItemImager(
             windowLister: lister,
@@ -358,7 +560,7 @@ struct MenuBarItemImagingTests {
         let capturer = StubMenuBarImageCapturer()
         capturer.failedWindowIDs = [10]
         let positioner = StubCapturePositioner()
-        positioner.needsRepositioning = true
+        positioner.shouldReposition = true
         let imager = MenuBarItemImager(
             windowLister: StubMenuBarWindowLister([windows, windows]),
             imageCapturer: capturer,
@@ -374,6 +576,32 @@ struct MenuBarItemImagingTests {
         #expect(positioner.restoreCallCount == 1)
         #expect(images?.map(\.windowID) == [11])
         #expect(images?.map(\.order) == [0])
+    }
+
+    @Test
+    func endsMaskingWhenCaptureThrows() async {
+        let windows = [window(10, x: -100), window(1, x: -70, width: 100)]
+        let capturer = StubMenuBarImageCapturer()
+        capturer.captureError = CancellationError()
+        let positioner = StubCapturePositioner()
+        positioner.shouldReposition = true
+        let masker = StubCaptureAreaMasker()
+        let imager = MenuBarItemImager(
+            windowLister: StubMenuBarWindowLister([windows, windows]),
+            imageCapturer: capturer,
+            capturePositioner: positioner,
+            areaMasker: masker
+        )
+
+        await #expect(throws: CancellationError.self) {
+            try await imager.captureHiddenItems(
+                mainDividerFrame: CGRect(x: -70, y: 0, width: 100, height: 24),
+                subDividerFrame: nil,
+                displayFrames: testDisplayFrames
+            )
+        }
+        #expect(positioner.restoreCallCount == 1)
+        #expect(masker.endCallCount == 1)
     }
 
     @Test
