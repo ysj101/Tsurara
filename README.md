@@ -27,4 +27,11 @@ Xcode がある環境ではそのまま `swift test` に委譲する。Xcode の
 Scripts/make-app.sh
 ```
 
-The script creates `build/Tsurara.app` with an ad-hoc code signature (not notarized). macOS may require you to approve it before launching it.
+The script creates `build/Tsurara.app` (not notarized). macOS may require you to approve it before launching it.
+
+署名は次の順で選ぶ。
+
+1. `TSURARA_SIGN_IDENTITY`（未設定なら `Tsurara Dev`）という名前の codesigning ID がキーチェーンにあれば、それで署名する。
+2. なければ ad-hoc 署名にフォールバックし、警告を出す。
+
+ad-hoc 署名の designated requirement は cdhash だけで構成されるため、再ビルドのたびに TCC からは別アプリと見なされ、アクセシビリティと画面収録の許可がやり直しになる。自己署名の証明書を「キーチェーンアクセス」で 1 つ作っておくと、許可が再ビルドをまたいで保持される。
