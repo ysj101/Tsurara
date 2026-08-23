@@ -187,6 +187,45 @@ struct MenuBarItemClickForwardingTests {
     }
 
     @Test
+    func resolvesShiftedSameOwnerItemByItsOwnerRelativeOrder() async throws {
+        let positioner = StubClickPositioner()
+        positioner.didReposition = true
+        let sender = StubClickSender()
+        let controller = MenuBarItemClickForwardingController(
+            windowLister: StubClickWindowLister(snapshots: [[
+                clickWindow(id: 10, frame: CGRect(x: -140, y: 0, width: 20, height: 24)),
+                clickWindow(id: 11, frame: CGRect(x: -100, y: 0, width: 20, height: 24)),
+                clickWindow(id: 12, frame: CGRect(x: -60, y: 0, width: 20, height: 24)),
+            ], [
+                clickWindow(id: 20, frame: CGRect(x: 300, y: 0, width: 20, height: 24)),
+                clickWindow(id: 21, frame: CGRect(x: 340, y: 0, width: 20, height: 24)),
+                clickWindow(id: 22, frame: CGRect(x: 380, y: 0, width: 20, height: 24)),
+            ]]),
+            positioner: positioner,
+            clickSender: sender,
+            interfaceTracker: StubInterfaceTracker()
+        )
+
+        try await controller.forwardClick(
+            on: clickItem(
+                id: 11,
+                frame: CGRect(x: -100, y: 0, width: 20, height: 24),
+                order: 1
+            ),
+            button: .left,
+            mainDividerFrame: CGRect(x: -30, y: 0, width: 20, height: 24),
+            subDividerFrame: nil,
+            displayFrames: clickDisplayFrames
+        )
+
+        #expect(positioner.preparedWindowIDs == [11])
+        #expect(sender.clicks == [
+            .init(point: CGPoint(x: 350, y: 12), button: .left, ownerPID: 123)
+        ])
+        #expect(positioner.restoreCount == 1)
+    }
+
+    @Test
     func pollsUntilRepositionedTargetIsReadyBeforeClicking() async throws {
         let positioner = StubClickPositioner()
         positioner.didReposition = true
