@@ -111,9 +111,12 @@ public final class MenuBarItemClickForwardingController:
                 ownerPID: item.owner.processIdentifier
             )
         }
+        // index の母集団は再配置後の探索と揃える必要がある。sectionWindows で
+        // 数えると、同じ owner が常時非表示セクションにも項目を持つ場合に
+        // ずれる（常時非表示側は展開されず左に残り、全体一覧では先に並ぶ）。
         let ownerWindowsBeforeRepositioning = ownerWindows(
             ownerPID: item.owner.processIdentifier,
-            in: sectionWindows
+            in: listedWindows
         )
         guard let indexAmongOwnerItems = ownerWindowsBeforeRepositioning
             .firstIndex(where: { $0.windowID == windowBeforeRepositioning.windowID })

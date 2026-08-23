@@ -81,15 +81,11 @@ public struct ImagedMenuBarItem: @unchecked Sendable {
 public enum MenuBarItemImagingError: Error, Equatable, LocalizedError {
     /// ウィンドウ撮像前の preflight で権限がないことを検出した。
     case screenRecordingPermissionDenied
-    /// 同じ Imager に対する撮像要求がすでに進行中。
-    case captureAlreadyInProgress
 
     public var errorDescription: String? {
         switch self {
         case .screenRecordingPermissionDenied:
             "画面収録の許可を確認できません。"
-        case .captureAlreadyInProgress:
-            "別のメニューバー撮像が進行中です。"
         }
     }
 }
@@ -180,7 +176,6 @@ struct MenuBarItemRepositionWaiter {
 public final class MenuBarItemImager {
     private let windowLister: any MenuBarItemWindowListing
     private let imageCapturer: any MenuBarItemImageCapturing
-    private var isCapturing = false
 
     public init(
         windowLister: any MenuBarItemWindowListing,
@@ -195,15 +190,8 @@ public final class MenuBarItemImager {
         subDividerFrame: CGRect?,
         displayFrames: [CGRect]
     ) async throws -> [ImagedMenuBarItem] {
-        guard !isCapturing else {
-            throw MenuBarItemImagingError.captureAlreadyInProgress
-        }
-        isCapturing = true
-        defer { isCapturing = false }
-
-        // 同期撮像へ切り替えても async API の同時実行拒否という契約を保つ。
-        await Task.yield()
-
+        // 撮像が同期化され、本体に中断点がなくなったため、MainActor の直列化だけで
+        // 撮像要求どうしは重ならない。async は呼び出し側の Task 構造を保つために残す。
         try imageCapturer.verifyScreenRecordingPermission()
 
         let windows = try windowLister.listMenuBarItemWindows()

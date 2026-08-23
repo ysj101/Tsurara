@@ -286,19 +286,24 @@ struct MenuBarItemImagingTests {
     }
 
     @Test
-    func rejectsConcurrentCapture() async {
+    func concurrentCapturesAreSerializedInsteadOfRejected() async {
+        // 撮像は同期化され本体に中断点がないため、MainActor の直列化だけで
+        // 撮像要求どうしは重ならない。両方が最後まで成功することで、専用の
+        // 排他フラグが不要になったことを示す。
+        let capturer = StubMenuBarImageCapturer()
         let imager = MenuBarItemImager(
             windowLister: StubMenuBarWindowLister([window(10, x: -100)]),
-            imageCapturer: StubMenuBarImageCapturer()
+            imageCapturer: capturer
         )
-        let capture: @MainActor @Sendable () async -> Result<Void, Error> = {
+        let capture: @MainActor @Sendable () async -> Result<[ImagedMenuBarItem], Error> = {
             do {
-                _ = try await imager.captureHiddenItems(
-                    mainDividerFrame: CGRect(x: -50, y: 0, width: 20, height: 24),
-                    subDividerFrame: nil,
-                    displayFrames: testDisplayFrames
+                return .success(
+                    try await imager.captureHiddenItems(
+                        mainDividerFrame: CGRect(x: -50, y: 0, width: 20, height: 24),
+                        subDividerFrame: nil,
+                        displayFrames: testDisplayFrames
+                    )
                 )
-                return .success(())
             } catch {
                 return .failure(error)
             }
@@ -307,12 +312,8 @@ struct MenuBarItemImagingTests {
         let first = Task { await capture() }
         let second = Task { await capture() }
         let results = [await first.value, await second.value]
-        let errors = results.compactMap { result -> Error? in
-            guard case let .failure(error) = result else { return nil }
-            return error
-        }
 
-        #expect(errors.count == 1)
-        #expect(errors.first as? MenuBarItemImagingError == .captureAlreadyInProgress)
+        #expect(results.allSatisfy { if case .success = $0 { true } else { false } })
+        #expect(capturer.capturedWindows.count == 2)
     }
 }

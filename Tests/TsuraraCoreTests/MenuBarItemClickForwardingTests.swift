@@ -226,6 +226,52 @@ struct MenuBarItemClickForwardingTests {
     }
 
     @Test
+    func resolvesHiddenItemWhenSameOwnerAlsoHasAnAlwaysHiddenItem() async throws {
+        // 常時非表示セクションの区切りは撮像用の一時展開でも戻らないため、その
+        // 項目だけ画面外に取り残される。owner 内 index を非表示セクションだけで
+        // 数えると 1 つずれ、取り残された項目をクリックしてしまう。
+        let positioner = StubClickPositioner()
+        positioner.didReposition = true
+        let sender = StubClickSender()
+        let alwaysHidden = clickWindow(
+            id: 9,
+            frame: CGRect(x: -260, y: 0, width: 20, height: 24)
+        )
+        let controller = MenuBarItemClickForwardingController(
+            windowLister: StubClickWindowLister(snapshots: [[
+                alwaysHidden,
+                clickWindow(id: 2, frame: CGRect(x: -200, y: 0, width: 20, height: 24)),
+                clickWindow(id: 11, frame: CGRect(x: -100, y: 0, width: 20, height: 24)),
+            ], [
+                alwaysHidden,
+                clickWindow(id: 2, frame: CGRect(x: -200, y: 0, width: 20, height: 24)),
+                clickWindow(id: 21, frame: CGRect(x: 340, y: 0, width: 20, height: 24)),
+            ]]),
+            positioner: positioner,
+            clickSender: sender,
+            interfaceTracker: StubInterfaceTracker()
+        )
+
+        try await controller.forwardClick(
+            on: clickItem(
+                id: 11,
+                frame: CGRect(x: -100, y: 0, width: 20, height: 24),
+                order: 0
+            ),
+            button: .left,
+            mainDividerFrame: CGRect(x: -30, y: 0, width: 20, height: 24),
+            subDividerFrame: CGRect(x: -200, y: 0, width: 20, height: 24),
+            displayFrames: clickDisplayFrames
+        )
+
+        #expect(positioner.preparedWindowIDs == [11])
+        // 取り残された常時非表示項目 (x: -260) ではなく、展開後の項目を押す。
+        #expect(sender.clicks == [
+            .init(point: CGPoint(x: 350, y: 12), button: .left, ownerPID: 123)
+        ])
+    }
+
+    @Test
     func pollsUntilRepositionedTargetIsReadyBeforeClicking() async throws {
         let positioner = StubClickPositioner()
         positioner.didReposition = true
