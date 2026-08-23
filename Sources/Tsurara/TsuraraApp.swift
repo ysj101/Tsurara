@@ -114,9 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             toggleItem: toggleItem,
             imager: MenuBarItemImager(
                 windowLister: windowLister,
-                imageCapturer: ScreenCaptureKitMenuBarItemImageCapturer(),
-                capturePositioner: positioner,
-                areaMasker: ScreenCaptureKitMenuBarAreaMasker()
+                imageCapturer: CGWindowListMenuBarItemImageCapturer()
             ),
             permissionController: ScreenCapturePermissionOnboardingController(),
             presentationController: presentationController,
