@@ -51,6 +51,7 @@ private final class StubClickSender: MenuBarItemClickSending {
         let point: CGPoint
         let button: MenuBarItemClickButton
         let ownerPID: pid_t
+        let windowID: CGWindowID
     }
 
     var error: Error?
@@ -59,9 +60,17 @@ private final class StubClickSender: MenuBarItemClickSending {
     func sendClick(
         at point: CGPoint,
         button: MenuBarItemClickButton,
-        ownerPID: pid_t
+        ownerPID: pid_t,
+        windowID: CGWindowID
     ) async throws {
-        clicks.append(SentClick(point: point, button: button, ownerPID: ownerPID))
+        clicks.append(
+            SentClick(
+                point: point,
+                button: button,
+                ownerPID: ownerPID,
+                windowID: windowID
+            )
+        )
         if let error { throw error }
     }
 }
@@ -179,11 +188,53 @@ struct MenuBarItemClickForwardingTests {
 
         #expect(positioner.preparedWindowIDs == [42])
         #expect(sender.clicks == [
-            .init(point: CGPoint(x: 412, y: 12), button: .left, ownerPID: 123)
+            .init(
+                point: CGPoint(x: 412, y: 12),
+                button: .left,
+                ownerPID: 123,
+                windowID: 99
+            )
         ])
         #expect(tracker.preparedOwnerPIDs == [123])
         #expect(tracker.waitCount == 1)
         #expect(positioner.restoreCount == 1)
+    }
+
+    @Test
+    func sendsWindowIDResolvedAfterTemporaryExpansion() async throws {
+        let positioner = StubClickPositioner()
+        positioner.didReposition = true
+        let sender = StubClickSender()
+        let controller = MenuBarItemClickForwardingController(
+            windowLister: StubClickWindowLister(snapshots: [[
+                clickWindow(
+                    id: 41,
+                    frame: CGRect(x: -100, y: 0, width: 20, height: 24)
+                )
+            ], [
+                clickWindow(
+                    id: 84,
+                    frame: CGRect(x: 400, y: 0, width: 20, height: 24)
+                )
+            ]]),
+            positioner: positioner,
+            clickSender: sender,
+            interfaceTracker: StubInterfaceTracker()
+        )
+
+        try await controller.forwardClick(
+            on: clickItem(
+                id: 41,
+                frame: CGRect(x: 400, y: 0, width: 20, height: 24),
+                sourceFrame: CGRect(x: -100, y: 0, width: 20, height: 24)
+            ),
+            button: .left,
+            mainDividerFrame: CGRect(x: -50, y: 0, width: 20, height: 24),
+            subDividerFrame: nil,
+            displayFrames: clickDisplayFrames
+        )
+
+        #expect(sender.clicks.map(\.windowID) == [84])
     }
 
     @Test
@@ -220,7 +271,12 @@ struct MenuBarItemClickForwardingTests {
 
         #expect(positioner.preparedWindowIDs == [11])
         #expect(sender.clicks == [
-            .init(point: CGPoint(x: 350, y: 12), button: .left, ownerPID: 123)
+            .init(
+                point: CGPoint(x: 350, y: 12),
+                button: .left,
+                ownerPID: 123,
+                windowID: 21
+            )
         ])
         #expect(positioner.restoreCount == 1)
     }
@@ -267,7 +323,12 @@ struct MenuBarItemClickForwardingTests {
         #expect(positioner.preparedWindowIDs == [11])
         // 取り残された常時非表示項目 (x: -260) ではなく、展開後の項目を押す。
         #expect(sender.clicks == [
-            .init(point: CGPoint(x: 350, y: 12), button: .left, ownerPID: 123)
+            .init(
+                point: CGPoint(x: 350, y: 12),
+                button: .left,
+                ownerPID: 123,
+                windowID: 21
+            )
         ])
     }
 
@@ -309,7 +370,12 @@ struct MenuBarItemClickForwardingTests {
         #expect(lister.callCount == 4)
         #expect(positioner.readinessCheckCount == 3)
         #expect(sender.clicks == [
-            .init(point: CGPoint(x: 410, y: 12), button: .left, ownerPID: 123)
+            .init(
+                point: CGPoint(x: 410, y: 12),
+                button: .left,
+                ownerPID: 123,
+                windowID: 42
+            )
         ])
         #expect(positioner.restoreCount == 1)
     }
@@ -393,7 +459,12 @@ struct MenuBarItemClickForwardingTests {
         )
 
         #expect(sender.clicks == [
-            .init(point: CGPoint(x: 410, y: 12), button: .left, ownerPID: 123)
+            .init(
+                point: CGPoint(x: 410, y: 12),
+                button: .left,
+                ownerPID: 123,
+                windowID: 42
+            )
         ])
         #expect(positioner.restoreCount == 1)
     }
@@ -422,7 +493,12 @@ struct MenuBarItemClickForwardingTests {
         )
 
         #expect(sender.clicks == [
-            .init(point: CGPoint(x: 110, y: 13), button: .right, ownerPID: 123)
+            .init(
+                point: CGPoint(x: 110, y: 13),
+                button: .right,
+                ownerPID: 123,
+                windowID: 42
+            )
         ])
         #expect(positioner.restoreCount == 0)
     }

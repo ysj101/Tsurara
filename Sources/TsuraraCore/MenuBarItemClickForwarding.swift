@@ -16,7 +16,8 @@ public protocol MenuBarItemClickSending: AnyObject {
     func sendClick(
         at point: CGPoint,
         button: MenuBarItemClickButton,
-        ownerPID: pid_t
+        ownerPID: pid_t,
+        windowID: CGWindowID
     ) async throws
 }
 
@@ -163,7 +164,8 @@ public final class MenuBarItemClickForwardingController:
         try await clickSender.sendClick(
             at: CGPoint(x: currentWindow.frame.midX, y: currentWindow.frame.midY),
             button: button,
-            ownerPID: currentWindow.owner.processIdentifier
+            ownerPID: currentWindow.owner.processIdentifier,
+            windowID: currentWindow.windowID
         )
 
         try await interfaceTracker.waitUntilInterfaceDismissed()
