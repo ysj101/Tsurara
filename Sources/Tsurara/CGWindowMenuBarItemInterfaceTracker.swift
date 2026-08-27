@@ -12,18 +12,14 @@ final class CGWindowMenuBarItemInterfaceTracker: MenuBarItemInterfaceTracking {
         let frame: CGRect
     }
 
-    private var ownerPID: pid_t?
     private var windowIDsBeforeClick: Set<CGWindowID> = []
 
-    func prepareForClick(ownerPID: pid_t) {
-        self.ownerPID = ownerPID
+    func prepareForClick() {
         windowIDsBeforeClick = Set(onScreenWindows().map(\.id))
     }
 
-    func waitUntilInterfaceDismissed() async throws {
-        guard let ownerPID else { return }
+    func waitUntilInterfaceDismissed(ownerPID: pid_t) async throws {
         defer {
-            self.ownerPID = nil
             windowIDsBeforeClick = []
         }
 
@@ -46,6 +42,9 @@ final class CGWindowMenuBarItemInterfaceTracker: MenuBarItemInterfaceTracking {
             } ?? candidates.first {
                 $0.layer >= CGWindowLevelForKey(.normalWindow)
                     && $0.layer < CGWindowLevelForKey(.statusWindow)
+            }
+            let allNew = onScreenWindows().filter { !windowIDsBeforeClick.contains($0.id) }
+            if !allNew.isEmpty {
             }
             if shownInterface == nil {
                 try await Task.sleep(for: .milliseconds(50))

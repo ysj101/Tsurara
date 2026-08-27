@@ -21,12 +21,24 @@ public protocol MenuBarItemClickSending: AnyObject {
     ) async throws
 }
 
+/// 実座標から AX 要素を解決して押す経路。合成イベントより優先する。
+@MainActor
+public protocol MenuBarItemAccessibilityActivating: AnyObject {
+    /// 押せた場合に、解決できた実際の所有プロセスを返す。押せなければ nil。
+    func activate(
+        at point: CGPoint,
+        itemFrame: CGRect,
+        button: MenuBarItemClickButton
+    ) async throws -> pid_t?
+}
+
 /// クリックで現れたメニュー／ポップオーバーの終了待ちを OS 実装から分離する境界。
 @MainActor
 public protocol MenuBarItemInterfaceTracking: AnyObject {
     /// クリック前のウィンドウ集合を記録する。
-    func prepareForClick(ownerPID: pid_t)
-    func waitUntilInterfaceDismissed() async throws
+    func prepareForClick()
+    /// クリック後に判明した所有プロセスのウィンドウを対象に、終了を待つ。
+    func waitUntilInterfaceDismissed(ownerPID: pid_t) async throws
 }
 
 @MainActor
@@ -42,12 +54,9 @@ public protocol MenuBarItemClickForwarding: AnyObject {
 
 /// サブバーの代理アイコンから実アイテムへクリックを転送する状態機械。
 ///
-/// Ice (jordanbaird/Ice) も、対象を一時的に表示可能な位置へ移し、現在位置へ
-/// CGEvent を送り、クリック後に新しく現れた同一 owner のウィンドウが消えるまで
-/// 再非表示を遅延させる方式を採っている。Accessibility の AXPress は実装ごとの
-/// accessibility tree 品質に左右され、CGWindowID から AXUIElement を一意に得る
-/// 公開 API もないため、展開前は区切り座標・owner・撮像時 frame、展開後は同一
-/// owner 内の並び順で対象を再特定し、現在位置へ CGEvent を送る方式を採用する。
+/// 対象を一時的に表示可能な位置へ移し、展開後の実座標で AX 要素を解決して押す。
+/// AX で押せない項目だけは同じ座標への CGEvent にフォールバックし、クリック後に
+/// 新しく現れた実際の owner のウィンドウが消えるまで再非表示を遅延させる。
 @MainActor
 public final class MenuBarItemClickForwardingController:
     MenuBarItemClickForwarding
@@ -56,6 +65,7 @@ public final class MenuBarItemClickForwardingController:
     private let positioner: any MenuBarItemCapturePositioning
     private let clickSender: any MenuBarItemClickSending
     private let interfaceTracker: any MenuBarItemInterfaceTracking
+    private let activator: (any MenuBarItemAccessibilityActivating)?
     private let repositionWaiter: MenuBarItemRepositionWaiter
 
     public init(
@@ -63,6 +73,7 @@ public final class MenuBarItemClickForwardingController:
         positioner: any MenuBarItemCapturePositioning,
         clickSender: any MenuBarItemClickSending,
         interfaceTracker: any MenuBarItemInterfaceTracking,
+        activator: (any MenuBarItemAccessibilityActivating)? = nil,
         repositionPollInterval: Duration = .milliseconds(20),
         repositionPollLimit: Int = 25
     ) {
@@ -70,6 +81,7 @@ public final class MenuBarItemClickForwardingController:
         self.positioner = positioner
         self.clickSender = clickSender
         self.interfaceTracker = interfaceTracker
+        self.activator = activator
         self.repositionWaiter = MenuBarItemRepositionWaiter(
             windowLister: windowLister,
             positioner: positioner,
@@ -158,17 +170,29 @@ public final class MenuBarItemClickForwardingController:
             currentWindow = windowBeforeRepositioning
         }
 
-        interfaceTracker.prepareForClick(
-            ownerPID: currentWindow.owner.processIdentifier
+        let clickPoint = CGPoint(
+            x: currentWindow.frame.midX,
+            y: currentWindow.frame.midY
         )
-        try await clickSender.sendClick(
-            at: CGPoint(x: currentWindow.frame.midX, y: currentWindow.frame.midY),
-            button: button,
-            ownerPID: currentWindow.owner.processIdentifier,
-            windowID: currentWindow.windowID
-        )
+        interfaceTracker.prepareForClick()
+        let ownerPID: pid_t
+        if let activatedOwnerPID = try await activator?.activate(
+            at: clickPoint,
+            itemFrame: currentWindow.frame,
+            button: button
+        ) {
+            ownerPID = activatedOwnerPID
+        } else {
+            try await clickSender.sendClick(
+                at: clickPoint,
+                button: button,
+                ownerPID: currentWindow.owner.processIdentifier,
+                windowID: currentWindow.windowID
+            )
+            ownerPID = currentWindow.owner.processIdentifier
+        }
 
-        try await interfaceTracker.waitUntilInterfaceDismissed()
+        try await interfaceTracker.waitUntilInterfaceDismissed(ownerPID: ownerPID)
     }
 
     private func closestWindow(

@@ -78,16 +78,43 @@ private final class StubClickSender: MenuBarItemClickSending {
 @MainActor
 private final class StubInterfaceTracker: MenuBarItemInterfaceTracking {
     var error: Error?
-    private(set) var preparedOwnerPIDs: [pid_t] = []
-    private(set) var waitCount = 0
+    private(set) var prepareCount = 0
+    private(set) var waitedOwnerPIDs: [pid_t] = []
 
-    func prepareForClick(ownerPID: pid_t) {
-        preparedOwnerPIDs.append(ownerPID)
+    func prepareForClick() {
+        prepareCount += 1
     }
 
-    func waitUntilInterfaceDismissed() async throws {
-        waitCount += 1
+    func waitUntilInterfaceDismissed(ownerPID: pid_t) async throws {
+        waitedOwnerPIDs.append(ownerPID)
         if let error { throw error }
+    }
+}
+
+@MainActor
+private final class StubActivator: MenuBarItemAccessibilityActivating {
+    struct Activation: Equatable {
+        let point: CGPoint
+        let itemFrame: CGRect
+        let button: MenuBarItemClickButton
+    }
+
+    var ownerPID: pid_t?
+    private(set) var activations: [Activation] = []
+
+    init(ownerPID: pid_t?) {
+        self.ownerPID = ownerPID
+    }
+
+    func activate(
+        at point: CGPoint,
+        itemFrame: CGRect,
+        button: MenuBarItemClickButton
+    ) -> pid_t? {
+        activations.append(
+            Activation(point: point, itemFrame: itemFrame, button: button)
+        )
+        return ownerPID
     }
 }
 
@@ -195,9 +222,149 @@ struct MenuBarItemClickForwardingTests {
                 windowID: 99
             )
         ])
-        #expect(tracker.preparedOwnerPIDs == [123])
-        #expect(tracker.waitCount == 1)
+        #expect(tracker.prepareCount == 1)
+        #expect(tracker.waitedOwnerPIDs == [123])
         #expect(positioner.restoreCount == 1)
+    }
+
+    @Test
+    func doesNotSendSyntheticClickWhenAccessibilityActivationSucceeds() async throws {
+        let sender = StubClickSender()
+        let activator = StubActivator(ownerPID: 456)
+        let controller = MenuBarItemClickForwardingController(
+            windowLister: StubClickWindowLister(
+                windows: [
+                    clickWindow(frame: CGRect(x: 100, y: 0, width: 20, height: 24))
+                ]
+            ),
+            positioner: StubClickPositioner(),
+            clickSender: sender,
+            interfaceTracker: StubInterfaceTracker(),
+            activator: activator
+        )
+
+        try await controller.forwardClick(
+            on: clickItem(frame: CGRect(x: 100, y: 0, width: 20, height: 24)),
+            button: .left,
+            mainDividerFrame: CGRect(x: 130, y: 0, width: 20, height: 24),
+            subDividerFrame: nil,
+            displayFrames: clickDisplayFrames
+        )
+
+        #expect(activator.activations.count == 1)
+        #expect(sender.clicks.isEmpty)
+    }
+
+    @Test
+    func tracksOwnerPIDResolvedByAccessibilityActivator() async throws {
+        let tracker = StubInterfaceTracker()
+        let controller = MenuBarItemClickForwardingController(
+            windowLister: StubClickWindowLister(
+                windows: [
+                    clickWindow(frame: CGRect(x: 100, y: 0, width: 20, height: 24))
+                ]
+            ),
+            positioner: StubClickPositioner(),
+            clickSender: StubClickSender(),
+            interfaceTracker: tracker,
+            activator: StubActivator(ownerPID: 456)
+        )
+
+        try await controller.forwardClick(
+            on: clickItem(frame: CGRect(x: 100, y: 0, width: 20, height: 24)),
+            button: .left,
+            mainDividerFrame: CGRect(x: 130, y: 0, width: 20, height: 24),
+            subDividerFrame: nil,
+            displayFrames: clickDisplayFrames
+        )
+
+        #expect(tracker.prepareCount == 1)
+        #expect(tracker.waitedOwnerPIDs == [456])
+    }
+
+    @Test
+    func fallsBackToSyntheticClickAndTracksCGWindowOwner() async throws {
+        let sender = StubClickSender()
+        let tracker = StubInterfaceTracker()
+        let controller = MenuBarItemClickForwardingController(
+            windowLister: StubClickWindowLister(
+                windows: [
+                    clickWindow(
+                        id: 77,
+                        frame: CGRect(x: 100, y: 0, width: 20, height: 24),
+                        ownerPID: 123
+                    )
+                ]
+            ),
+            positioner: StubClickPositioner(),
+            clickSender: sender,
+            interfaceTracker: tracker,
+            activator: StubActivator(ownerPID: nil)
+        )
+
+        try await controller.forwardClick(
+            on: clickItem(
+                id: 77,
+                frame: CGRect(x: 100, y: 0, width: 20, height: 24),
+                ownerPID: 123
+            ),
+            button: .right,
+            mainDividerFrame: CGRect(x: 130, y: 0, width: 20, height: 24),
+            subDividerFrame: nil,
+            displayFrames: clickDisplayFrames
+        )
+
+        #expect(sender.clicks == [
+            .init(
+                point: CGPoint(x: 110, y: 12),
+                button: .right,
+                ownerPID: 123,
+                windowID: 77
+            )
+        ])
+        #expect(tracker.waitedOwnerPIDs == [123])
+    }
+
+    @Test
+    func activatesAtFrameResolvedAfterTemporaryExpansion() async throws {
+        let positioner = StubClickPositioner()
+        positioner.didReposition = true
+        let activator = StubActivator(ownerPID: 456)
+        let expandedFrame = CGRect(x: 400, y: 2, width: 24, height: 22)
+        let controller = MenuBarItemClickForwardingController(
+            windowLister: StubClickWindowLister(snapshots: [[
+                clickWindow(
+                    id: 41,
+                    frame: CGRect(x: -100, y: 0, width: 20, height: 24)
+                )
+            ], [
+                clickWindow(id: 84, frame: expandedFrame)
+            ]]),
+            positioner: positioner,
+            clickSender: StubClickSender(),
+            interfaceTracker: StubInterfaceTracker(),
+            activator: activator
+        )
+
+        try await controller.forwardClick(
+            on: clickItem(
+                id: 41,
+                frame: expandedFrame,
+                sourceFrame: CGRect(x: -100, y: 0, width: 20, height: 24)
+            ),
+            button: .right,
+            mainDividerFrame: CGRect(x: -50, y: 0, width: 20, height: 24),
+            subDividerFrame: nil,
+            displayFrames: clickDisplayFrames
+        )
+
+        #expect(activator.activations == [
+            .init(
+                point: CGPoint(x: 412, y: 13),
+                itemFrame: expandedFrame,
+                button: .right
+            )
+        ])
     }
 
     @Test
