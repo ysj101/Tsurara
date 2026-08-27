@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import TsuraraCore
 
 enum CoreGraphicsMenuBarItemClickError: Error {
@@ -51,29 +52,75 @@ final class CoreGraphicsMenuBarItemClickSender: MenuBarItemClickSending {
             windowID: windowID
         )
 
-        // HID tap への投稿は実カーソルを対象座標へワープさせる。対象プロセスへ
-        // 直接配送すれば、他プロセスと実カーソルへ副作用を広げずに済む。
-        mouseDown.postToPid(ownerPID)
+        Self.permitLocalEventsDuringSuppression()
+
+        let originalCursorPosition = CGEvent(source: nil)?.location
+        CGDisplayHideCursor(CGMainDisplayID())
+        defer {
+            if let originalCursorPosition {
+                CGWarpMouseCursorPosition(originalCursorPosition)
+            }
+            CGDisplayShowCursor(CGMainDisplayID())
+        }
+
+        let buttonKind = switch button {
+        case .left: "left"
+        case .right: "right"
+        }
+        NSLog(
+            "クリック転送: button=%@ windowID=%u pid=%d point=(%.1f, %.1f)",
+            buttonKind,
+            windowID,
+            ownerPID,
+            point.x,
+            point.y
+        )
+
+        // postToPid は WindowServer のヒットテストを経由しないため、宛先フィールドを
+        // 設定しても実際の配送には結びつかない。同じ OS 制約下で成功している Ice と
+        // 同様に session tap へ投稿し、移動する実カーソルは投稿中だけ隠して元の位置へ戻す。
+        mouseDown.post(tap: .cgSessionEventTap)
         defer {
             // sleep のキャンセルも含め、down を送った全経路で必ず up を対にする。
-            mouseUp.postToPid(ownerPID)
+            mouseUp.post(tap: .cgSessionEventTap)
         }
         // down/up を同一 run-loop tick に詰めると一部の常駐アプリが up を落とすため、
         // 人間のクリックより十分短い間隔だけ空ける。
-        try await Task.sleep(for: .milliseconds(10))
+        try await Task.sleep(for: .milliseconds(25))
     }
 
     /// 公開の CGEventField には無い、AppKit が宛先ウィンドウ番号として読む値。
     /// jordanbaird/Ice も公開フィールドと併せてこの 0x33 に同じ値を入れている。
     private static let windowNumberEventField = CGEventField(rawValue: 0x33)
 
+    private static func permitLocalEventsDuringSuppression() {
+        guard let source = CGEventSource(stateID: .combinedSessionState) else {
+            return
+        }
+
+        let permitAllEvents: CGEventFilterMask = [
+            .permitLocalMouseEvents,
+            .permitLocalKeyboardEvents,
+            .permitSystemDefinedEvents,
+        ]
+        source.setLocalEventsFilterDuringSuppressionState(
+            permitAllEvents,
+            state: .eventSuppressionStateRemoteMouseDrag
+        )
+        source.setLocalEventsFilterDuringSuppressionState(
+            permitAllEvents,
+            state: .eventSuppressionStateSuppressionInterval
+        )
+        source.localEventsSuppressionInterval = 0
+    }
+
     private func configure(
         events: [CGEvent],
         ownerPID: pid_t,
         windowID: CGWindowID
     ) {
-        // postToPid は WindowServer のヒットテストを経ないため、宛先 PID だけでは
-        // NSEvent の windowNumber が決まらない。対象ウィンドウも明示して配送する。
+        // session tap で WindowServer が対象を特定できるよう、PID と対象ウィンドウを
+        // 宛先フィールドに明示する。
         for event in events {
             event.setIntegerValueField(.mouseEventClickState, value: 1)
             event.setIntegerValueField(
