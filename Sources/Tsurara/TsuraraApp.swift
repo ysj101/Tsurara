@@ -123,7 +123,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 positioner: positioner,
                 clickSender: CoreGraphicsMenuBarItemClickSender(),
                 interfaceTracker: CGWindowMenuBarItemInterfaceTracker(),
-                activator: AXMenuBarItemActivator()
+                activator: AXMenuBarItemActivator(),
+                mover: CoreGraphicsMenuBarItemMover(windowLister: windowLister)
             ),
             accessibilityPermissionController:
                 AccessibilityPermissionOnboardingController()
