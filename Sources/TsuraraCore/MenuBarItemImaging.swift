@@ -45,6 +45,17 @@ public extension MenuBarItemWindow {
             return frame.intersects(menuBarBand)
         }
     }
+
+    /// WindowServer の列挙順に依存せず、メニューバー上の左から右を決める。
+    static func isOrderedBefore(
+        _ lhs: MenuBarItemWindow,
+        _ rhs: MenuBarItemWindow
+    ) -> Bool {
+        if lhs.frame.minX == rhs.frame.minX {
+            return lhs.windowID < rhs.windowID
+        }
+        return lhs.frame.minX < rhs.frame.minX
+    }
 }
 
 /// サブバーが表示に使う、撮像済みのメニューバー項目。
@@ -123,51 +134,36 @@ public extension MenuBarItemCapturePositioning {
 @MainActor
 struct MenuBarItemRepositionWaiter {
     private let windowLister: any MenuBarItemWindowListing
-    private let positioner: any MenuBarItemCapturePositioning
     private let pollInterval: Duration
     private let pollLimit: Int
 
     init(
         windowLister: any MenuBarItemWindowListing,
-        positioner: any MenuBarItemCapturePositioning,
         pollInterval: Duration,
         pollLimit: Int
     ) {
         self.windowLister = windowLister
-        self.positioner = positioner
         self.pollInterval = pollInterval
         self.pollLimit = max(1, pollLimit)
     }
 
     func waitUntilReady(
-        resolvingWindows resolve: ([MenuBarItemWindow]) -> [MenuBarItemWindow]
-    ) async throws -> [MenuBarItemWindow] {
-        var refreshed: [MenuBarItemWindow] = []
+        resolvingWindow resolve: ([MenuBarItemWindow]) -> MenuBarItemWindow?,
+        isReady: (MenuBarItemWindow) -> Bool
+    ) async throws -> MenuBarItemWindow? {
         for attempt in 0..<pollLimit {
             try Task.checkCancellation()
-            refreshed = resolve(try windowLister.listMenuBarItemWindows())
-            // 再配置中は対象が一瞬だけ列挙から消えることがある。空の結果を
-            // 「全員準備完了」とみなすと待ち合わせが即座に打ち切られるため、
-            // 1件以上そろって初めて完了とする。
-            if !refreshed.isEmpty,
-               refreshed.allSatisfy(positioner.isReadyForCapture) {
-                return refreshed
+            // 再配置中は対象が一瞬だけ列挙から消えることがあるため、nil でも
+            // タイムアウトまでは次の列挙を待つ。
+            if let window = resolve(try windowLister.listMenuBarItemWindows()),
+               isReady(window) {
+                return window
             }
             if attempt + 1 < pollLimit {
                 try await Task.sleep(for: pollInterval)
             }
         }
-        // タイムアウト時は、準備できた項目だけを部分的な結果として返す。
-        return refreshed.filter(positioner.isReadyForCapture)
-    }
-
-    /// 対象が 1 件だけの経路（クリック転送）向けの糖衣。
-    func waitUntilReady(
-        resolvingWindow resolve: ([MenuBarItemWindow]) -> MenuBarItemWindow?
-    ) async throws -> MenuBarItemWindow? {
-        try await waitUntilReady { windows in
-            resolve(windows).map { [$0] } ?? []
-        }.first
+        return nil
     }
 }
 
@@ -248,12 +244,7 @@ enum MenuBarItemSectionGeometry {
                     window.frame.minX >= $0.maxX
                 } ?? true
             }
-            .sorted {
-                if $0.frame.minX == $1.frame.minX {
-                    return $0.windowID < $1.windowID
-                }
-                return $0.frame.minX < $1.frame.minX
-            }
+            .sorted(by: MenuBarItemWindow.isOrderedBefore)
     }
 
     private static func displayContainingDivider(

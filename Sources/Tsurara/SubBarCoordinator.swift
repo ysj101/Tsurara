@@ -125,10 +125,12 @@ final class SubBarCoordinator {
                     button: button,
                     mainDividerFrame: mainDividerFrame,
                     subDividerFrame: subDividerFrame,
+                    toggleFrame: toggleItem.dividerFrame,
                     displayFrames: AppKitScreenGeometry.cgFrames
                 )
             } catch is CancellationError {
-                // Core 側の defer が区切りを復元する。終了時の警告は不要。
+                // Core は移動開始後ならアイコンの復帰を終えてから cancellation を返す。
+                // length 展開経路も defer で区切りを復元済みなので警告は不要。
             } catch {
                 showForwardingFailure(error)
             }
@@ -202,9 +204,15 @@ final class SubBarCoordinator {
     private func showForwardingFailure(_ error: Error) {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "アイコンを操作できませんでした"
-        alert.informativeText = "実際のメニューバーアイコンへのクリック転送に失敗しました。\n\(error.localizedDescription)"
+        if let forwardingError = error as? MenuBarItemClickForwardingError,
+           case .itemRestorationFailed = forwardingError {
+            alert.messageText = "アイコンを元の位置に戻せませんでした"
+        } else {
+            alert.messageText = "アイコンを操作できませんでした"
+        }
+        alert.informativeText = error.localizedDescription
         alert.addButton(withTitle: "OK")
+        NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
     }
 }

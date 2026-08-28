@@ -29,8 +29,10 @@ private final class StubClickPositioner: MenuBarItemCapturePositioning {
     private(set) var preparedWindowIDs: [CGWindowID] = []
     private(set) var readinessCheckCount = 0
     private(set) var restoreCount = 0
+    var eventLog: ((String) -> Void)?
 
     func prepareForCapture(of windows: [MenuBarItemWindow]) -> Bool {
+        eventLog?("expand")
         preparedWindowIDs = windows.map(\.windowID)
         return didReposition
     }
@@ -41,7 +43,39 @@ private final class StubClickPositioner: MenuBarItemCapturePositioning {
     }
 
     func restoreAfterCapture() {
+        eventLog?("restoreExpansion")
         restoreCount += 1
+    }
+}
+
+@MainActor
+private final class StubMover: MenuBarItemMoving {
+    struct Move: Equatable {
+        let itemID: CGWindowID
+        let destination: MenuBarItemMoveDestination
+    }
+
+    struct StubFailure: Error {}
+
+    var failuresByCallIndex: [Int: MenuBarItemMoveFailure] = [:]
+    var returnedWindowsByCallIndex: [Int: MenuBarItemWindow] = [:]
+    var eventLog: ((String) -> Void)?
+    private(set) var moves: [Move] = []
+    private(set) var suppliedWindows: [[MenuBarItemWindow]?] = []
+
+    func move(
+        _ item: MenuBarItemWindow,
+        to destination: MenuBarItemMoveDestination,
+        in windows: [MenuBarItemWindow]? = nil
+    ) async throws(MenuBarItemMoveFailure) -> MenuBarItemWindow {
+        let callIndex = moves.count
+        moves.append(.init(itemID: item.windowID, destination: destination))
+        suppliedWindows.append(windows)
+        eventLog?(callIndex == 0 ? "moveOut" : "moveBack")
+        if let failure = failuresByCallIndex[callIndex] {
+            throw failure
+        }
+        return returnedWindowsByCallIndex[callIndex] ?? item
     }
 }
 
@@ -80,12 +114,14 @@ private final class StubInterfaceTracker: MenuBarItemInterfaceTracking {
     var error: Error?
     private(set) var prepareCount = 0
     private(set) var waitedOwnerPIDs: [pid_t] = []
+    var eventLog: ((String) -> Void)?
 
     func prepareForClick() {
         prepareCount += 1
     }
 
     func waitUntilInterfaceDismissed(ownerPID: pid_t) async throws {
+        eventLog?("wait")
         waitedOwnerPIDs.append(ownerPID)
         if let error { throw error }
     }
@@ -100,6 +136,8 @@ private final class StubActivator: MenuBarItemAccessibilityActivating {
     }
 
     var ownerPID: pid_t?
+    var error: Error?
+    var eventLog: ((String) -> Void)?
     private(set) var activations: [Activation] = []
 
     init(ownerPID: pid_t?) {
@@ -110,10 +148,12 @@ private final class StubActivator: MenuBarItemAccessibilityActivating {
         at point: CGPoint,
         itemFrame: CGRect,
         button: MenuBarItemClickButton
-    ) -> pid_t? {
+    ) throws -> pid_t? {
+        eventLog?("activate")
         activations.append(
             Activation(point: point, itemFrame: itemFrame, button: button)
         )
+        if let error { throw error }
         return ownerPID
     }
 }
@@ -169,6 +209,35 @@ private let clickDisplayFrames = [
     CGRect(x: -1_000, y: 0, width: 3_000, height: 1_080)
 ]
 
+@MainActor
+private func makeMovingController(
+    windowLister: StubClickWindowLister,
+    mover: StubMover,
+    positioner: StubClickPositioner = StubClickPositioner(),
+    clickSender: StubClickSender = StubClickSender(),
+    interfaceTracker: StubInterfaceTracker = StubInterfaceTracker(),
+    activator: StubActivator? = nil,
+    repositionPollLimit: Int = 2,
+    restorationAttemptLimit: Int = 3,
+    restorationRetryDelay: Duration = .milliseconds(100)
+) -> MenuBarItemClickForwardingController {
+    if mover.returnedWindowsByCallIndex[0] == nil {
+        mover.returnedWindowsByCallIndex[0] = temporaryMoveVisibleTarget
+    }
+    return MenuBarItemClickForwardingController(
+        windowLister: windowLister,
+        positioner: positioner,
+        clickSender: clickSender,
+        interfaceTracker: interfaceTracker,
+        activator: activator,
+        mover: mover,
+        repositionPollInterval: .zero,
+        repositionPollLimit: repositionPollLimit,
+        restorationAttemptLimit: restorationAttemptLimit,
+        restorationRetryDelay: restorationRetryDelay
+    )
+}
+
 @Suite
 @MainActor
 struct MenuBarItemClickForwardingTests {
@@ -210,6 +279,7 @@ struct MenuBarItemClickForwardingTests {
             button: .left,
             mainDividerFrame: CGRect(x: -50, y: 0, width: 20, height: 24),
             subDividerFrame: nil,
+            toggleFrame: nil,
             displayFrames: clickDisplayFrames
         )
 
@@ -248,6 +318,7 @@ struct MenuBarItemClickForwardingTests {
             button: .left,
             mainDividerFrame: CGRect(x: 130, y: 0, width: 20, height: 24),
             subDividerFrame: nil,
+            toggleFrame: nil,
             displayFrames: clickDisplayFrames
         )
 
@@ -275,6 +346,7 @@ struct MenuBarItemClickForwardingTests {
             button: .left,
             mainDividerFrame: CGRect(x: 130, y: 0, width: 20, height: 24),
             subDividerFrame: nil,
+            toggleFrame: nil,
             displayFrames: clickDisplayFrames
         )
 
@@ -311,6 +383,7 @@ struct MenuBarItemClickForwardingTests {
             button: .right,
             mainDividerFrame: CGRect(x: 130, y: 0, width: 20, height: 24),
             subDividerFrame: nil,
+            toggleFrame: nil,
             displayFrames: clickDisplayFrames
         )
 
@@ -355,6 +428,7 @@ struct MenuBarItemClickForwardingTests {
             button: .right,
             mainDividerFrame: CGRect(x: -50, y: 0, width: 20, height: 24),
             subDividerFrame: nil,
+            toggleFrame: nil,
             displayFrames: clickDisplayFrames
         )
 
@@ -398,6 +472,7 @@ struct MenuBarItemClickForwardingTests {
             button: .left,
             mainDividerFrame: CGRect(x: -50, y: 0, width: 20, height: 24),
             subDividerFrame: nil,
+            toggleFrame: nil,
             displayFrames: clickDisplayFrames
         )
 
@@ -433,6 +508,7 @@ struct MenuBarItemClickForwardingTests {
             button: .left,
             mainDividerFrame: CGRect(x: -30, y: 0, width: 20, height: 24),
             subDividerFrame: nil,
+            toggleFrame: nil,
             displayFrames: clickDisplayFrames
         )
 
@@ -484,6 +560,7 @@ struct MenuBarItemClickForwardingTests {
             button: .left,
             mainDividerFrame: CGRect(x: -30, y: 0, width: 20, height: 24),
             subDividerFrame: CGRect(x: -200, y: 0, width: 20, height: 24),
+            toggleFrame: nil,
             displayFrames: clickDisplayFrames
         )
 
@@ -531,6 +608,7 @@ struct MenuBarItemClickForwardingTests {
             button: .left,
             mainDividerFrame: CGRect(x: -50, y: 0, width: 20, height: 24),
             subDividerFrame: nil,
+            toggleFrame: nil,
             displayFrames: clickDisplayFrames
         )
 
@@ -577,6 +655,7 @@ struct MenuBarItemClickForwardingTests {
                 button: .left,
                 mainDividerFrame: CGRect(x: -50, y: 0, width: 20, height: 24),
                 subDividerFrame: nil,
+                toggleFrame: nil,
                 displayFrames: clickDisplayFrames
             )
         }
@@ -622,6 +701,7 @@ struct MenuBarItemClickForwardingTests {
             button: .left,
             mainDividerFrame: CGRect(x: -50, y: 0, width: 20, height: 24),
             subDividerFrame: nil,
+            toggleFrame: nil,
             displayFrames: clickDisplayFrames
         )
 
@@ -656,6 +736,7 @@ struct MenuBarItemClickForwardingTests {
             button: .right,
             mainDividerFrame: CGRect(x: 130, y: 0, width: 20, height: 24),
             subDividerFrame: nil,
+            toggleFrame: nil,
             displayFrames: clickDisplayFrames
         )
 
@@ -693,6 +774,7 @@ struct MenuBarItemClickForwardingTests {
             button: .left,
             mainDividerFrame: CGRect(x: 150, y: 0, width: 20, height: 24),
             subDividerFrame: nil,
+            toggleFrame: nil,
             displayFrames: clickDisplayFrames
         )
 
@@ -724,6 +806,7 @@ struct MenuBarItemClickForwardingTests {
                 button: .left,
                 mainDividerFrame: CGRect(x: 130, y: 0, width: 20, height: 24),
                 subDividerFrame: nil,
+                toggleFrame: nil,
                 displayFrames: clickDisplayFrames
             )
         }
@@ -759,6 +842,7 @@ struct MenuBarItemClickForwardingTests {
                 button: .left,
                 mainDividerFrame: CGRect(x: -50, y: 0, width: 20, height: 24),
                 subDividerFrame: nil,
+                toggleFrame: nil,
                 displayFrames: clickDisplayFrames
             )
         }
@@ -788,6 +872,7 @@ struct MenuBarItemClickForwardingTests {
                 button: .left,
                 mainDividerFrame: CGRect(x: -50, y: 0, width: 20, height: 24),
                 subDividerFrame: nil,
+                toggleFrame: nil,
                 displayFrames: clickDisplayFrames
             )
         }
@@ -795,4 +880,497 @@ struct MenuBarItemClickForwardingTests {
         #expect(sender.clicks.isEmpty)
         #expect(positioner.restoreCount == 1)
     }
+
+    @Test
+    func movesOneItemActivatesWaitsAndMovesItBackInOrder() async throws {
+        var events: [String] = []
+        let mover = StubMover()
+        mover.eventLog = { events.append($0) }
+        let activator = StubActivator(ownerPID: 123)
+        activator.eventLog = { events.append($0) }
+        let tracker = StubInterfaceTracker()
+        tracker.eventLog = { events.append($0) }
+        let initial = temporaryMoveInitialWindows
+        let moved = temporaryMoveVisibleWindows
+        let controller = makeMovingController(
+            windowLister: StubClickWindowLister(
+                snapshots: [initial, moved, moved]
+            ),
+            mover: mover,
+            interfaceTracker: tracker,
+            activator: activator,
+            repositionPollLimit: 2
+        )
+
+        try await controller.forwardClick(
+            on: temporaryMoveItem,
+            button: .left,
+            mainDividerFrame: temporaryMoveMainDivider.frame,
+            subDividerFrame: nil,
+            toggleFrame: temporaryMoveToggle.frame,
+            displayFrames: clickDisplayFrames
+        )
+
+        #expect(events == ["moveOut", "activate", "wait", "moveBack"])
+        #expect(mover.moves == [
+            .init(
+                itemID: 42,
+                destination: .leftOf(
+                    anchorFrame: temporaryMoveToggle.frame,
+                    anchorWindowID: nil
+                )
+            ),
+            .init(
+                itemID: 42,
+                destination: .leftOf(
+                    anchorFrame: temporaryMoveRightNeighbor.frame,
+                    anchorWindowID: temporaryMoveRightNeighbor.windowID
+                )
+            ),
+        ])
+    }
+
+    @Test
+    func movesItemBackWhenActivationThrows() async {
+        struct ActivationFailure: Error {}
+
+        var events: [String] = []
+        let mover = StubMover()
+        mover.eventLog = { events.append($0) }
+        let activator = StubActivator(ownerPID: nil)
+        activator.error = ActivationFailure()
+        activator.eventLog = { events.append($0) }
+        let moved = temporaryMoveVisibleWindows
+        let controller = makeMovingController(
+            windowLister: StubClickWindowLister(
+                snapshots: [temporaryMoveInitialWindows, moved, moved]
+            ),
+            mover: mover,
+            activator: activator,
+            repositionPollLimit: 2
+        )
+
+        await #expect(throws: ActivationFailure.self) {
+            try await controller.forwardClick(
+                on: temporaryMoveItem,
+                button: .left,
+                mainDividerFrame: temporaryMoveMainDivider.frame,
+                subDividerFrame: nil,
+                toggleFrame: temporaryMoveToggle.frame,
+                displayFrames: clickDisplayFrames
+            )
+        }
+
+        #expect(events == ["moveOut", "activate", "moveBack"])
+    }
+
+    @Test
+    func restoresWhenMoveOutIsCancelledAfterPosting() async {
+        var events: [String] = []
+        let mover = StubMover()
+        mover.failuresByCallIndex = [
+            0: .indeterminate(CancellationError())
+        ]
+        mover.eventLog = { events.append($0) }
+        let sender = StubClickSender()
+        let controller = makeMovingController(
+            windowLister: StubClickWindowLister(
+                snapshots: [
+                    temporaryMoveInitialWindows,
+                    temporaryMoveInitialWindows,
+                ]
+            ),
+            mover: mover,
+            clickSender: sender,
+            restorationRetryDelay: .zero
+        )
+
+        await #expect(throws: CancellationError.self) {
+            try await controller.forwardClick(
+                on: temporaryMoveItem,
+                button: .left,
+                mainDividerFrame: temporaryMoveMainDivider.frame,
+                subDividerFrame: nil,
+                toggleFrame: temporaryMoveToggle.frame,
+                displayFrames: clickDisplayFrames
+            )
+        }
+
+        #expect(events == ["moveOut", "moveBack"])
+        #expect(sender.clicks.isEmpty)
+    }
+
+    @Test
+    func waitsForIndeterminateMoveOutToSettleBeforeRestoring() async {
+        let mover = StubMover()
+        mover.failuresByCallIndex = [
+            0: .indeterminate(CancellationError())
+        ]
+        let lister = StubClickWindowLister(snapshots: [
+            temporaryMoveInitialWindows,
+            temporaryMoveInitialWindows,
+            temporaryMoveVisibleWindows,
+            temporaryMoveVisibleWindows,
+        ])
+        let controller = makeMovingController(
+            windowLister: lister,
+            mover: mover,
+            repositionPollLimit: 2,
+            restorationRetryDelay: .zero
+        )
+
+        await #expect(throws: CancellationError.self) {
+            try await controller.forwardClick(
+                on: temporaryMoveItem,
+                button: .left,
+                mainDividerFrame: temporaryMoveMainDivider.frame,
+                subDividerFrame: nil,
+                toggleFrame: temporaryMoveToggle.frame,
+                displayFrames: clickDisplayFrames
+            )
+        }
+
+        #expect(mover.moves.count == 2)
+        #expect(
+            mover.suppliedWindows[1]?.first(where: { $0.windowID == 42 })?.frame
+                == temporaryMoveVisibleTarget.frame
+        )
+        #expect(lister.callCount == 4)
+    }
+
+    @Test
+    func restorationReResolvesRightThenLeftThenDivider() async throws {
+        let left = clickWindow(
+            id: 41,
+            frame: CGRect(x: -130, y: 0, width: 20, height: 24),
+            ownerPID: 410
+        )
+        let initial = [
+            left,
+            clickWindow(
+                id: 42,
+                frame: CGRect(x: -100, y: 0, width: 20, height: 24)
+            ),
+            temporaryMoveRightNeighbor,
+        ]
+        let movedTarget = clickWindow(
+            id: 42,
+            frame: CGRect(x: 250, y: 0, width: 20, height: 24)
+        )
+        let moved = [left, temporaryMoveRightNeighbor, movedTarget]
+        let mover = StubMover()
+        mover.failuresByCallIndex = [
+            1: .indeterminate(StubMover.StubFailure()),
+            2: .indeterminate(StubMover.StubFailure()),
+        ]
+        let controller = makeMovingController(
+            windowLister: StubClickWindowLister(snapshots: [
+                initial,
+                moved,
+                [left, movedTarget],
+                [movedTarget],
+            ]),
+            mover: mover,
+            activator: StubActivator(ownerPID: 123),
+            repositionPollLimit: 2,
+            restorationAttemptLimit: 3,
+            restorationRetryDelay: .zero
+        )
+
+        try await controller.forwardClick(
+            on: temporaryMoveItem,
+            button: .left,
+            mainDividerFrame: temporaryMoveMainDivider.frame,
+            subDividerFrame: nil,
+            toggleFrame: temporaryMoveToggle.frame,
+            displayFrames: clickDisplayFrames
+        )
+
+        #expect(mover.moves.map(\.destination) == [
+            .leftOf(
+                anchorFrame: temporaryMoveToggle.frame,
+                anchorWindowID: nil
+            ),
+            .leftOf(
+                anchorFrame: temporaryMoveRightNeighbor.frame,
+                anchorWindowID: temporaryMoveRightNeighbor.windowID
+            ),
+            .rightOf(
+                anchorFrame: left.frame,
+                anchorWindowID: left.windowID
+            ),
+            .leftOf(
+                anchorFrame: temporaryMoveMainDivider.frame,
+                anchorWindowID: nil
+            ),
+        ])
+    }
+
+    @Test
+    func movedPathUsesExactWindowReturnedByMoverInsteadOfOwnerIndex() async throws {
+        let sameOwner = clickWindow(
+            id: 40,
+            frame: CGRect(x: -140, y: 0, width: 20, height: 24)
+        )
+        let wrongWindow = clickWindow(
+            id: 99,
+            frame: CGRect(x: 220, y: 0, width: 20, height: 24)
+        )
+        let exactWindow = clickWindow(
+            id: 42,
+            frame: CGRect(x: 250, y: 0, width: 20, height: 24)
+        )
+        let initial = [
+            sameOwner,
+            clickWindow(
+                id: 42,
+                frame: CGRect(x: -100, y: 0, width: 20, height: 24)
+            ),
+            temporaryMoveRightNeighbor,
+        ]
+        let activator = StubActivator(ownerPID: 123)
+        let mover = StubMover()
+        mover.returnedWindowsByCallIndex[0] = exactWindow
+        let controller = makeMovingController(
+            windowLister: StubClickWindowLister(snapshots: [
+                initial,
+                [sameOwner, wrongWindow, temporaryMoveRightNeighbor],
+            ]),
+            mover: mover,
+            activator: activator,
+            repositionPollLimit: 3,
+            restorationRetryDelay: .zero
+        )
+
+        try await controller.forwardClick(
+            on: temporaryMoveItem,
+            button: .left,
+            mainDividerFrame: temporaryMoveMainDivider.frame,
+            subDividerFrame: nil,
+            toggleFrame: temporaryMoveToggle.frame,
+            displayFrames: clickDisplayFrames
+        )
+
+        #expect(activator.activations.map(\.itemFrame) == [exactWindow.frame])
+    }
+
+    @Test
+    func retriesRestorationAndReportsWhenAllAttemptsFail() async {
+        let mover = StubMover()
+        mover.failuresByCallIndex = [
+            1: .indeterminate(StubMover.StubFailure()),
+            2: .indeterminate(StubMover.StubFailure()),
+            3: .indeterminate(StubMover.StubFailure()),
+        ]
+        let moved = temporaryMoveVisibleWindows
+        let controller = makeMovingController(
+            windowLister: StubClickWindowLister(
+                snapshots: [temporaryMoveInitialWindows, moved, moved]
+            ),
+            mover: mover,
+            activator: StubActivator(ownerPID: 123),
+            repositionPollLimit: 2,
+            restorationAttemptLimit: 3
+        )
+
+        await #expect(
+            throws: MenuBarItemClickForwardingError.itemRestorationFailed(
+                ownerPID: 123
+            )
+        ) {
+            try await controller.forwardClick(
+                on: temporaryMoveItem,
+                button: .left,
+                mainDividerFrame: temporaryMoveMainDivider.frame,
+                subDividerFrame: nil,
+                toggleFrame: temporaryMoveToggle.frame,
+                displayFrames: clickDisplayFrames
+            )
+        }
+
+        #expect(mover.moves.count == 4)
+    }
+
+    @Test
+    func fallsBackToLengthExpansionWhenMoveOutFails() async throws {
+        var events: [String] = []
+        let mover = StubMover()
+        mover.failuresByCallIndex = [
+            0: .notMoved(StubMover.StubFailure())
+        ]
+        mover.eventLog = { events.append($0) }
+        let positioner = StubClickPositioner()
+        positioner.didReposition = true
+        positioner.eventLog = { events.append($0) }
+        let expanded = temporaryMoveVisibleWindows
+        let controller = makeMovingController(
+            windowLister: StubClickWindowLister(
+                snapshots: [
+                    temporaryMoveInitialWindows,
+                    expanded,
+                ]
+            ),
+            mover: mover,
+            positioner: positioner,
+            repositionPollLimit: 1
+        )
+
+        try await controller.forwardClick(
+            on: temporaryMoveItem,
+            button: .left,
+            mainDividerFrame: temporaryMoveMainDivider.frame,
+            subDividerFrame: nil,
+            toggleFrame: temporaryMoveToggle.frame,
+            displayFrames: clickDisplayFrames
+        )
+
+        #expect(events == ["moveOut", "expand", "restoreExpansion"])
+        #expect(positioner.restoreCount == 1)
+    }
+
+    @Test
+    func choosesReturnAnchorByRightThenLeftThenMainDivider() {
+        let left = clickWindow(
+            id: 10,
+            frame: CGRect(x: -140, y: 0, width: 20, height: 24),
+            ownerPID: 10
+        )
+        let target = clickWindow(
+            id: 20,
+            frame: CGRect(x: -100, y: 0, width: 20, height: 24),
+            ownerPID: 20
+        )
+        let right = clickWindow(
+            id: 30,
+            frame: CGRect(x: -60, y: 0, width: 20, height: 24),
+            ownerPID: 30
+        )
+
+        let anchors = MenuBarItemReturnAnchors.computing(
+            for: target,
+            in: [right, target, left],
+            mainDividerFrame: temporaryMoveMainDivider.frame
+        )
+        #expect(
+            anchors.destination(currentWindows: [right, left]) == .leftOf(
+                anchorFrame: right.frame,
+                anchorWindowID: right.windowID
+            )
+        )
+        #expect(
+            anchors.destination(currentWindows: [left]) == .rightOf(
+                anchorFrame: left.frame,
+                anchorWindowID: left.windowID
+            )
+        )
+        #expect(
+            anchors.destination(currentWindows: []) == .leftOf(
+                anchorFrame: temporaryMoveMainDivider.frame,
+                anchorWindowID: nil
+            )
+        )
+    }
+
+    @Test
+    func moveDestinationRequiresTheCorrectSideWithinTolerance() {
+        let anchor = CGRect(x: 1_000, y: 0, width: 20, height: 24)
+        let leftDestination = MenuBarItemMoveDestination.leftOf(
+            anchorFrame: anchor,
+            anchorWindowID: 1
+        )
+        let rightDestination = MenuBarItemMoveDestination.rightOf(
+            anchorFrame: anchor,
+            anchorWindowID: 1
+        )
+
+        #expect(leftDestination.isSatisfied(
+            by: CGRect(x: 970, y: 0, width: 20, height: 24),
+            tolerance: 25
+        ))
+        #expect(!leftDestination.isSatisfied(
+            by: CGRect(x: 1_010, y: 0, width: 20, height: 24),
+            tolerance: 300
+        ))
+        #expect(!leftDestination.isSatisfied(
+            by: CGRect(x: 900, y: 0, width: 20, height: 24),
+            tolerance: 25
+        ))
+        #expect(leftDestination.isSatisfied(
+            by: CGRect(x: 988, y: 0, width: 20, height: 24),
+            tolerance: 25
+        ))
+        #expect(!leftDestination.isSatisfied(
+            by: CGRect(x: 989, y: 0, width: 20, height: 24),
+            tolerance: 25
+        ))
+
+        #expect(rightDestination.isSatisfied(
+            by: CGRect(x: 1_030, y: 0, width: 20, height: 24),
+            tolerance: 25
+        ))
+        #expect(!rightDestination.isSatisfied(
+            by: CGRect(x: 990, y: 0, width: 20, height: 24),
+            tolerance: 300
+        ))
+        #expect(!rightDestination.isSatisfied(
+            by: CGRect(x: 1_100, y: 0, width: 20, height: 24),
+            tolerance: 25
+        ))
+        #expect(rightDestination.isSatisfied(
+            by: CGRect(x: 1_012, y: 0, width: 20, height: 24),
+            tolerance: 25
+        ))
+        #expect(!rightDestination.isSatisfied(
+            by: CGRect(x: 1_011, y: 0, width: 20, height: 24),
+            tolerance: 25
+        ))
+    }
 }
+
+@MainActor
+private let temporaryMoveMainDivider = clickWindow(
+    id: 900,
+    frame: CGRect(x: -40, y: 0, width: 20, height: 24),
+    ownerPID: 999
+)
+
+@MainActor
+private let temporaryMoveToggle = clickWindow(
+    id: 901,
+    frame: CGRect(x: 300, y: 0, width: 24, height: 24),
+    ownerPID: 999
+)
+
+@MainActor
+private let temporaryMoveRightNeighbor = clickWindow(
+    id: 43,
+    frame: CGRect(x: -70, y: 0, width: 20, height: 24),
+    ownerPID: 456
+)
+
+@MainActor
+private let temporaryMoveItem = clickItem(
+    id: 42,
+    frame: CGRect(x: -100, y: 0, width: 20, height: 24)
+)
+
+@MainActor
+private let temporaryMoveVisibleTarget = clickWindow(
+    id: 42,
+    frame: CGRect(x: 250, y: 0, width: 20, height: 24)
+)
+
+@MainActor
+private let temporaryMoveInitialWindows = [
+    clickWindow(
+        id: 42,
+        frame: CGRect(x: -100, y: 0, width: 20, height: 24)
+    ),
+    temporaryMoveRightNeighbor,
+]
+
+@MainActor
+private let temporaryMoveVisibleWindows = [
+    temporaryMoveRightNeighbor,
+    temporaryMoveVisibleTarget,
+]
