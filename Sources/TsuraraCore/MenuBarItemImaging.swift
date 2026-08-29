@@ -1,11 +1,17 @@
 import CoreGraphics
 import Foundation
 
+/// title の「空文字は情報なし」という規則を、生成元によらず 1 箇所で適用する。
+private func normalizedTitle(_ title: String?) -> String? {
+    title?.isEmpty == false ? title : nil
+}
+
 /// CGWindowList から得た、撮像前のメニューバー項目ウィンドウ。
 public struct MenuBarItemWindow: Equatable, Sendable {
     public let windowID: CGWindowID
     public let frame: CGRect
     public let owner: MenuBarItemOwner
+    public let title: String?
     /// CGWindow と同じ左上原点座標系で、このウィンドウが属する画面。
     public let displayFrame: CGRect?
 
@@ -13,11 +19,13 @@ public struct MenuBarItemWindow: Equatable, Sendable {
         windowID: CGWindowID,
         frame: CGRect,
         owner: MenuBarItemOwner,
+        title: String? = nil,
         displayFrame: CGRect? = nil
     ) {
         self.windowID = windowID
         self.frame = frame
         self.owner = owner
+        self.title = normalizedTitle(title)
         self.displayFrame = displayFrame
     }
 }
@@ -69,6 +77,7 @@ public struct ImagedMenuBarItem: @unchecked Sendable {
     public let sourceFrame: CGRect
     public let frame: CGRect
     public let owner: MenuBarItemOwner
+    public let title: String?
     /// メニューバーを左から右へ見たときの 0 始まりの順序。
     public let order: Int
 
@@ -78,6 +87,7 @@ public struct ImagedMenuBarItem: @unchecked Sendable {
         frame: CGRect,
         sourceFrame: CGRect? = nil,
         owner: MenuBarItemOwner,
+        title: String? = nil,
         order: Int
     ) {
         self.windowID = windowID
@@ -85,6 +95,7 @@ public struct ImagedMenuBarItem: @unchecked Sendable {
         self.sourceFrame = sourceFrame ?? frame
         self.frame = frame
         self.owner = owner
+        self.title = normalizedTitle(title)
         self.order = order
     }
 }
@@ -209,6 +220,7 @@ public final class MenuBarItemImager {
                     frame: window.frame,
                     sourceFrame: window.frame,
                     owner: window.owner,
+                    title: window.title,
                     order: results.count
                 )
             )

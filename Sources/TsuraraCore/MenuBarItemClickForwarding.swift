@@ -221,6 +221,7 @@ public final class MenuBarItemClickForwardingController: MenuBarItemClickForward
         guard let target = closestWindow(
             to: item.sourceFrame,
             ownerPID: item.owner.processIdentifier,
+            title: item.title,
             preferredOrder: item.order,
             in: sectionWindows
         ) else {
@@ -302,13 +303,14 @@ public final class MenuBarItemClickForwardingController: MenuBarItemClickForward
             }
         }
 
-        // length 展開は同一 owner 内の並びを変えない。この経路だけは展開前の
-        // owner 内 index で、windowID が更新された項目を安全に対応付けられる。
-        let ownerWindowsBeforeRepositioning = ownerWindows(
+        // length 展開は同一ソース内の並びを変えない。この経路だけは展開前の
+        // ソース内 index で、windowID が更新された項目を安全に対応付けられる。
+        let sourceWindowsBeforeRepositioning = sourceWindows(
             ownerPID: item.owner.processIdentifier,
+            title: item.title,
             in: listedWindows
         )
-        guard let indexAmongOwnerItems = ownerWindowsBeforeRepositioning
+        guard let indexAmongSourceItems = sourceWindowsBeforeRepositioning
             .firstIndex(where: { $0.windowID == target.windowID })
         else {
             throw MenuBarItemClickForwardingError.itemNotFound(
@@ -321,14 +323,15 @@ public final class MenuBarItemClickForwardingController: MenuBarItemClickForward
         if didReposition {
             let readyWindow = try await repositionWaiter.waitUntilReady(
                 resolvingWindow: { windows in
-                    let ownerWindows = self.ownerWindows(
+                    let sourceWindows = self.sourceWindows(
                         ownerPID: item.owner.processIdentifier,
+                        title: item.title,
                         in: windows
                     )
-                    guard ownerWindows.indices.contains(indexAmongOwnerItems) else {
+                    guard sourceWindows.indices.contains(indexAmongSourceItems) else {
                         return nil
                     }
-                    return ownerWindows[indexAmongOwnerItems]
+                    return sourceWindows[indexAmongSourceItems]
                 },
                 isReady: positioner.isReadyForCapture
             )
@@ -450,13 +453,20 @@ public final class MenuBarItemClickForwardingController: MenuBarItemClickForward
     private func closestWindow(
         to frame: CGRect,
         ownerPID: pid_t,
+        title: String?,
         preferredOrder: Int,
         in windows: [MenuBarItemWindow]
     ) -> MenuBarItemWindow? {
-        windows
+        // preferredOrder はセクション全体での並び位置なので、候補を絞った後も
+        // offset はセクション全体の並びで数える。
+        let candidateIDs = Set(
+            sourceWindows(ownerPID: ownerPID, title: title, in: windows)
+                .map(\.windowID)
+        )
+        return windows
             .sorted(by: MenuBarItemWindow.isOrderedBefore)
             .enumerated()
-            .filter { $0.element.owner.processIdentifier == ownerPID }
+            .filter { candidateIDs.contains($0.element.windowID) }
             .min { lhs, rhs in
                 let lhsDistance = geometryDistance(lhs.element.frame, frame)
                 let rhsDistance = geometryDistance(rhs.element.frame, frame)
@@ -470,12 +480,19 @@ public final class MenuBarItemClickForwardingController: MenuBarItemClickForward
             }?.element
     }
 
-    private func ownerWindows(
+    /// 同一ソース（同じアプリ由来）とみなす候補を、メニューバーの並び順で返す。
+    private func sourceWindows(
         ownerPID: pid_t,
+        title: String?,
         in windows: [MenuBarItemWindow]
     ) -> [MenuBarItemWindow] {
-        windows
-            .filter { $0.owner.processIdentifier == ownerPID }
+        let ownerWindows = windows.filter {
+            $0.owner.processIdentifier == ownerPID
+        }
+        let titleMatchingWindows = ownerWindows.filter { $0.title == title }
+
+        // 権限変更などで title が取得できなくなった場合は、従来どおり owner PID で対応付ける。
+        return (titleMatchingWindows.isEmpty ? ownerWindows : titleMatchingWindows)
             .sorted(by: MenuBarItemWindow.isOrderedBefore)
     }
 

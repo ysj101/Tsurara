@@ -17,6 +17,10 @@ final class SubBarPanel: NSPanel, SubBarPanelPresenting {
     var onItemClick: ((ImagedMenuBarItem, MenuBarItemClickButton) -> Void)?
 
     private let layoutCalculator: any SubBarPanelLayoutCalculating
+    private let appNameForBundleID: @MainActor (String) -> String?
+    // アプリ名の変更は稀で tooltip 用途では多少の古さを許容できるため、panel の生存中は保持する。
+    // 解決できなかった bundle ID はそのまま表示するため、最終表示文字列を値に持つ。
+    private var appNameCache: [String: String] = [:]
     private var anchorFrameProvider: (@MainActor () -> CGRect?)?
     // AppKit の monitor token は Sendable ではない。登録・解除は MainActor 上だけで
     // 行い、nonisolated deinit から最終解除するため token の格納だけ unsafe とする。
@@ -25,9 +29,12 @@ final class SubBarPanel: NSPanel, SubBarPanelPresenting {
 
     init(
         layoutCalculator: any SubBarPanelLayoutCalculating =
-            SubBarPanelLayoutCalculator()
+            SubBarPanelLayoutCalculator(),
+        appNameForBundleID: @escaping @MainActor (String) -> String? =
+            BundleIdentifierAppNameResolver.resolve
     ) {
         self.layoutCalculator = layoutCalculator
+        self.appNameForBundleID = appNameForBundleID
         super.init(
             contentRect: .zero,
             styleMask: [.borderless, .nonactivatingPanel],
@@ -133,7 +140,11 @@ final class SubBarPanel: NSPanel, SubBarPanelPresenting {
                 frame: CGRect(x: x, y: (itemHeight - size.height) / 2, width: size.width, height: size.height)
             )
             itemView.image = NSImage(cgImage: item.image, size: size)
-            itemView.toolTip = item.owner.name
+            itemView.toolTip = MenuBarItemDisplayName.resolve(
+                title: item.title,
+                ownerName: item.owner.name,
+                appNameForBundleID: { appName(forBundleID: $0) }
+            )
             itemView.onClick = { [weak self] button in
                 self?.onItemClick?(item, button)
             }
@@ -143,6 +154,15 @@ final class SubBarPanel: NSPanel, SubBarPanelPresenting {
         scrollView.documentView = document
         root.addSubview(scrollView)
         return root
+    }
+
+    private func appName(forBundleID bundleID: String) -> String {
+        if let cachedName = appNameCache[bundleID] {
+            return cachedName
+        }
+        let resolvedName = appNameForBundleID(bundleID) ?? bundleID
+        appNameCache[bundleID] = resolvedName
+        return resolvedName
     }
 
     private func installOutsideClickMonitors() {

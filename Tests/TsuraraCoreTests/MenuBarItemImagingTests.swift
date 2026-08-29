@@ -69,12 +69,14 @@ private func window(
     width: CGFloat = 20,
     ownerPID: pid_t = 100,
     ownerName: String = "Sample",
+    title: String? = nil,
     displayFrame: CGRect? = nil
 ) -> MenuBarItemWindow {
     MenuBarItemWindow(
         windowID: id,
         frame: CGRect(x: x, y: y, width: width, height: 24),
         owner: MenuBarItemOwner(processIdentifier: ownerPID, name: ownerName),
+        title: title,
         displayFrame: displayFrame
     )
 }
@@ -100,7 +102,7 @@ struct MenuBarItemImagingTests {
         let windows = [
             window(90, x: -260, ownerName: "Always Hidden"),
             window(2, x: -200, width: 100),
-            window(12, x: -80, ownerName: "Left Item"),
+            window(12, x: -80, ownerName: "Left Item", title: "com.example.Left"),
             window(11, x: -50, ownerName: "Right Item"),
             window(1, x: -20, width: 200),
             window(91, x: 190, ownerName: "Visible"),
@@ -118,6 +120,7 @@ struct MenuBarItemImagingTests {
         #expect(images.map(\.windowID) == [12, 11])
         #expect(images.map(\.order) == [0, 1])
         #expect(images.map(\.owner.name) == ["Left Item", "Right Item"])
+        #expect(images.map(\.title) == ["com.example.Left", nil])
         #expect(images.map(\.frame.minX) == [-80, -50])
         #expect(images.map(\.sourceFrame.minX) == [-80, -50])
         #expect(capturer.capturedWindows.map { $0.map(\.windowID) } == [[12, 11]])

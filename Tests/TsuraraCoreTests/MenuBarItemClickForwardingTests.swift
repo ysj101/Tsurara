@@ -162,7 +162,8 @@ private final class StubActivator: MenuBarItemAccessibilityActivating {
 private func clickWindow(
     id: CGWindowID = 42,
     frame: CGRect,
-    ownerPID: pid_t = 123
+    ownerPID: pid_t = 123,
+    title: String? = nil
 ) -> MenuBarItemWindow {
     MenuBarItemWindow(
         windowID: id,
@@ -170,7 +171,8 @@ private func clickWindow(
         owner: MenuBarItemOwner(
             processIdentifier: ownerPID,
             name: "Example"
-        )
+        ),
+        title: title
     )
 }
 
@@ -179,6 +181,7 @@ private func clickItem(
     frame: CGRect,
     sourceFrame: CGRect? = nil,
     ownerPID: pid_t = 123,
+    title: String? = nil,
     order: Int = 0
 ) -> ImagedMenuBarItem {
     ImagedMenuBarItem(
@@ -201,6 +204,7 @@ private func clickItem(
         frame: frame,
         sourceFrame: sourceFrame,
         owner: MenuBarItemOwner(processIdentifier: ownerPID, name: "Example"),
+        title: title,
         order: order
     )
 }
@@ -781,6 +785,125 @@ struct MenuBarItemClickForwardingTests {
         #expect(positioner.preparedWindowIDs == [42])
         #expect(sender.clicks.map(\.point.x) == [130])
         #expect(lister.callCount == 1)
+    }
+
+    @Test
+    func selectsMatchingTitleWhenOwnerPIDIsSharedAndFrameHasMoved() async throws {
+        let positioner = StubClickPositioner()
+        let sender = StubClickSender()
+        let controller = MenuBarItemClickForwardingController(
+            windowLister: StubClickWindowLister(windows: [
+                clickWindow(
+                    id: 41,
+                    frame: CGRect(x: 100, y: 0, width: 20, height: 24),
+                    ownerPID: 661,
+                    title: "com.example.Other"
+                ),
+                clickWindow(
+                    id: 42,
+                    frame: CGRect(x: 180, y: 0, width: 20, height: 24),
+                    ownerPID: 661,
+                    title: "com.example.Target"
+                ),
+            ]),
+            positioner: positioner,
+            clickSender: sender,
+            interfaceTracker: StubInterfaceTracker()
+        )
+
+        try await controller.forwardClick(
+            on: clickItem(
+                frame: CGRect(x: 100, y: 0, width: 20, height: 24),
+                ownerPID: 661,
+                title: "com.example.Target"
+            ),
+            button: .left,
+            mainDividerFrame: CGRect(x: 220, y: 0, width: 20, height: 24),
+            subDividerFrame: nil,
+            toggleFrame: nil,
+            displayFrames: clickDisplayFrames
+        )
+
+        #expect(positioner.preparedWindowIDs == [42])
+        #expect(sender.clicks.map(\.windowID) == [42])
+    }
+
+    @Test
+    func fallsBackToOwnerPIDWhenCapturedTitleIsNoLongerAvailable() async throws {
+        let positioner = StubClickPositioner()
+        let sender = StubClickSender()
+        let controller = MenuBarItemClickForwardingController(
+            windowLister: StubClickWindowLister(windows: [
+                clickWindow(
+                    id: 41,
+                    frame: CGRect(x: 100, y: 0, width: 20, height: 24),
+                    ownerPID: 661
+                ),
+                clickWindow(
+                    id: 42,
+                    frame: CGRect(x: 180, y: 0, width: 20, height: 24),
+                    ownerPID: 661
+                ),
+            ]),
+            positioner: positioner,
+            clickSender: sender,
+            interfaceTracker: StubInterfaceTracker()
+        )
+
+        try await controller.forwardClick(
+            on: clickItem(
+                frame: CGRect(x: 180, y: 0, width: 20, height: 24),
+                ownerPID: 661,
+                title: "com.example.Target"
+            ),
+            button: .left,
+            mainDividerFrame: CGRect(x: 220, y: 0, width: 20, height: 24),
+            subDividerFrame: nil,
+            toggleFrame: nil,
+            displayFrames: clickDisplayFrames
+        )
+
+        #expect(positioner.preparedWindowIDs == [42])
+        #expect(sender.clicks.map(\.windowID) == [42])
+    }
+
+    @Test
+    func matchesNilTitlesAsTheSameSource() async throws {
+        let positioner = StubClickPositioner()
+        let sender = StubClickSender()
+        let controller = MenuBarItemClickForwardingController(
+            windowLister: StubClickWindowLister(windows: [
+                clickWindow(
+                    id: 41,
+                    frame: CGRect(x: 100, y: 0, width: 20, height: 24),
+                    ownerPID: 661,
+                    title: "WiFi"
+                ),
+                clickWindow(
+                    id: 42,
+                    frame: CGRect(x: 180, y: 0, width: 20, height: 24),
+                    ownerPID: 661
+                ),
+            ]),
+            positioner: positioner,
+            clickSender: sender,
+            interfaceTracker: StubInterfaceTracker()
+        )
+
+        try await controller.forwardClick(
+            on: clickItem(
+                frame: CGRect(x: 100, y: 0, width: 20, height: 24),
+                ownerPID: 661
+            ),
+            button: .left,
+            mainDividerFrame: CGRect(x: 220, y: 0, width: 20, height: 24),
+            subDividerFrame: nil,
+            toggleFrame: nil,
+            displayFrames: clickDisplayFrames
+        )
+
+        #expect(positioner.preparedWindowIDs == [42])
+        #expect(sender.clicks.map(\.windowID) == [42])
     }
 
     @Test
