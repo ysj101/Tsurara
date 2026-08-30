@@ -41,6 +41,9 @@ public struct MenuBarItemOwner: Equatable, Sendable {
 }
 
 public extension MenuBarItemWindow {
+    /// 長いテキスト項目を許容しつつ、メニューバーから離れたウィンドウを除外するための帯の高さ。
+    static let menuBarBandHeight: CGFloat = 64
+
     /// CG 座標系の画面矩形を使い、実際のメニューバー行に見えているか判定する。
     func isVisibleOnMenuBar(displayFrames: [CGRect]) -> Bool {
         displayFrames.contains { display in
@@ -48,7 +51,7 @@ public extension MenuBarItemWindow {
                 x: display.minX,
                 y: display.minY,
                 width: display.width,
-                height: max(64, frame.height)
+                height: max(Self.menuBarBandHeight, frame.height)
             )
             return frame.intersects(menuBarBand)
         }

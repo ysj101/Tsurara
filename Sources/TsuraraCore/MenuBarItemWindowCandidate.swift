@@ -1,37 +1,43 @@
 import CoreGraphics
 
 public enum MenuBarItemWindowCandidate {
+    public static func isCandidateLevel(layer: Int32, statusWindowLevel: Int32) -> Bool {
+        let levelOffset = Int64(layer) - Int64(statusWindowLevel)
+        // CGWindowMenuBarItemInterfaceTracker は status 未満をクリックで開いた UI と分類し、
+        // CoreGraphicsMenuBarItemMover は候補を Cmd ドラッグ可能な status item と仮定するため、
+        // mainMenu レベルを混在させない。
+        return (0 ... 2).contains(levelOffset)
+    }
+
     public static func isMenuBarItemWindow(
         layer: Int32,
         frame: CGRect,
         statusWindowLevel: Int32,
         displayFrames: [CGRect]
     ) -> Bool {
+        // status レベルを早期受理する場合も、実体のない 0 サイズを列挙しないため先に検証する。
+        guard frame.width > 0, frame.height > 0 else { return false }
+
+        guard isCandidateLevel(layer: layer, statusWindowLevel: statusWindowLevel) else {
+            return false
+        }
+
         // status レベルの画面外項目も撮像するため、幾何条件より先に従来どおり受理する。
         guard layer != statusWindowLevel else { return true }
 
-        let levelOffset = Int64(layer) - Int64(statusWindowLevel)
-        // mainMenu から status の直上 2 段までは実装差を許容しつつ、
-        // より上層のポップアップメニューを候補に含めないため範囲を狭く保つ。
-        guard (-1 ... 2).contains(levelOffset) else { return false }
-
-        // 64pt は既存の表示判定と揃え、長いテキスト項目には余裕を持たせつつ、
-        // 画面幅のメニューバー本体や大きなパネルを除外する。
+        // 無関係なウィンドウの誤検出を避けるため保守的な上限を設ける。
+        // 512pt を超える幅広項目を扱えない点は、既知の課題として残す。
         guard
-            frame.width > 0,
-            frame.height > 0,
             frame.width <= 512,
-            frame.height <= 64
+            frame.height <= MenuBarItemWindow.menuBarBandHeight
         else { return false }
 
+        // HUD や縦積み画面の別端を拾わず、実際の上端にアンカーされた項目だけに絞る。
         // 隠し項目は負の x 座標にあり得るため、水平方向の交差は要求しない。
-        let menuBarDisplays = displayFrames.filter { display in
-            frame.maxY > display.minY && frame.minY < display.minY + 64
+        return displayFrames.contains { display in
+            frame.minY >= display.minY
+                && frame.minY <= display.minY + 16
+                && frame.maxY <= display.minY + MenuBarItemWindow.menuBarBandHeight
         }
-        guard !menuBarDisplays.isEmpty else { return false }
-
-        // 同じ高さに並ぶ画面があっても、そのどれかのメニューバー本体を
-        // 別画面の項目と誤認しないよう、該当する全画面より狭いことを求める。
-        return menuBarDisplays.allSatisfy { frame.width < $0.width }
     }
 }
