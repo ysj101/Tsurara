@@ -19,23 +19,12 @@ struct MenuBarItemWindowCandidateTests {
 
     @Test
     func rejectsSmallMainMenuLevelWindowInMenuBarBand() {
-        #expect(!MenuBarItemWindowCandidate.isMenuBarItemWindow(
-            layer: statusWindowLevel - 1,
-            frame: CGRect(x: 100, y: 0, width: 24, height: 24),
-            statusWindowLevel: statusWindowLevel,
-            displayFrames: [display]
-        ))
+        #expect(!isCandidate(layer: statusWindowLevel - 1, x: 100, y: 0))
     }
 
     @Test
     func rejectsNormalWindow() {
-        #expect(!isCandidate(
-            layer: 0,
-            x: 100,
-            y: 200,
-            width: 800,
-            height: 600
-        ))
+        #expect(!isCandidate(layer: 0, x: 100, y: 200))
     }
 
     @Test
@@ -51,10 +40,11 @@ struct MenuBarItemWindowCandidateTests {
     @Test
     func rejectsWindowNearBottomOfVerticallyStackedDisplay() {
         let upperDisplay = CGRect(x: 0, y: -1_080, width: 1_920, height: 1_080)
-        #expect(!MenuBarItemWindowCandidate.isMenuBarItemWindow(
+        #expect(!isCandidate(
             layer: statusWindowLevel + 1,
-            frame: CGRect(x: 100, y: -20, width: 24, height: 20),
-            statusWindowLevel: statusWindowLevel,
+            x: 100,
+            y: -20,
+            height: 20,
             displayFrames: [display, upperDisplay]
         ))
     }
@@ -62,10 +52,10 @@ struct MenuBarItemWindowCandidateTests {
     @Test
     func acceptsItemOnUpperDisplayInMultipleDisplayConfiguration() {
         let upperDisplay = CGRect(x: 0, y: -1_080, width: 1_920, height: 1_080)
-        #expect(MenuBarItemWindowCandidate.isMenuBarItemWindow(
+        #expect(isCandidate(
             layer: statusWindowLevel + 1,
-            frame: CGRect(x: 100, y: -1_076, width: 24, height: 24),
-            statusWindowLevel: statusWindowLevel,
+            x: 100,
+            y: -1_076,
             displayFrames: [display, upperDisplay]
         ))
     }
@@ -97,13 +87,14 @@ struct MenuBarItemWindowCandidateTests {
         x: CGFloat,
         y: CGFloat,
         width: CGFloat = 24,
-        height: CGFloat = 24
+        height: CGFloat = 24,
+        displayFrames: [CGRect]? = nil
     ) -> Bool {
         MenuBarItemWindowCandidate.isMenuBarItemWindow(
             layer: layer,
             frame: CGRect(x: x, y: y, width: width, height: height),
             statusWindowLevel: statusWindowLevel,
-            displayFrames: [display]
+            displayFrames: displayFrames ?? [display]
         )
     }
 }
