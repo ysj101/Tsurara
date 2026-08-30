@@ -19,15 +19,24 @@ final class CGWindowMenuBarItemWindowLister: MenuBarItemWindowListing {
         let statusLevel = CGWindowLevelForKey(.statusWindow)
         let displays = AppKitScreenGeometry.cgFrames
         return dictionaries.compactMap { dictionary in
+            // 10ms ごとに数百件を走査するため、安価な level 判定を先に行い、
+            // 対象外なら ID・PID・bounds のブリッジ変換を避ける。
             guard
                 let layer = (dictionary[kCGWindowLayer as String] as? NSNumber)?.int32Value,
-                layer == statusLevel,
+                MenuBarItemWindowCandidate.isCandidateLevel(
+                    layer: layer,
+                    statusWindowLevel: statusLevel
+                ),
                 let windowID = (dictionary[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
                 let ownerPID = (dictionary[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
                 let bounds = dictionary[kCGWindowBounds as String] as? [String: NSNumber],
                 let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary),
-                frame.width > 0,
-                frame.height > 0
+                MenuBarItemWindowCandidate.isMenuBarItemWindow(
+                    layer: layer,
+                    frame: frame,
+                    statusWindowLevel: statusLevel,
+                    displayFrames: displays
+                )
             else { return nil }
 
             let displayFrame = displays.first { frame.intersects($0) }
