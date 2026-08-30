@@ -21,13 +21,18 @@ final class CGWindowMenuBarItemWindowLister: MenuBarItemWindowListing {
         return dictionaries.compactMap { dictionary in
             guard
                 let layer = (dictionary[kCGWindowLayer as String] as? NSNumber)?.int32Value,
-                layer == statusLevel,
                 let windowID = (dictionary[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
                 let ownerPID = (dictionary[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
                 let bounds = dictionary[kCGWindowBounds as String] as? [String: NSNumber],
                 let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary),
                 frame.width > 0,
-                frame.height > 0
+                frame.height > 0,
+                MenuBarItemWindowCandidate.isMenuBarItemWindow(
+                    layer: layer,
+                    frame: frame,
+                    statusWindowLevel: statusLevel,
+                    displayFrames: displays
+                )
             else { return nil }
 
             let displayFrame = displays.first { frame.intersects($0) }
