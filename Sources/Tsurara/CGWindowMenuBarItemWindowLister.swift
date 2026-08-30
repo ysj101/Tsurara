@@ -31,7 +31,6 @@ final class CGWindowMenuBarItemWindowLister: MenuBarItemWindowListing {
             else { return nil }
 
             let displayFrame = displays.first { frame.intersects($0) }
-
             return MenuBarItemWindow(
                 windowID: windowID,
                 frame: frame,
@@ -39,6 +38,7 @@ final class CGWindowMenuBarItemWindowLister: MenuBarItemWindowListing {
                     processIdentifier: ownerPID,
                     name: dictionary[kCGWindowOwnerName as String] as? String ?? ""
                 ),
+                title: dictionary[kCGWindowName as String] as? String,
                 displayFrame: displayFrame
             )
         }
