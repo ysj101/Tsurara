@@ -7,14 +7,18 @@ struct SettingsView: View {
 
     init(
         settings: SettingsStore = SettingsStore(),
-        loginItemManager: any LoginItemManaging = SMAppServiceLoginItem()
+        loginItemManager: any LoginItemManaging = SMAppServiceLoginItem(),
+        placementCoordinator: MenuBarItemPlacementCoordinator? = nil
     ) {
         _viewModel = State(initialValue: SettingsViewModel(settings: settings))
         loginItemSynchronizer = LoginItemSettingsSynchronizer(
             settings: settings,
             loginItemManager: loginItemManager
         )
+        self.placementCoordinator = placementCoordinator
     }
+
+    private let placementCoordinator: MenuBarItemPlacementCoordinator?
 
     var body: some View {
         TabView {
@@ -26,8 +30,12 @@ struct SettingsView: View {
                 Label("一般", systemImage: "gearshape")
             }
             HotkeySettingsTab()
+            if let placementCoordinator {
+                ItemPlacementSettingsView(coordinator: placementCoordinator)
+                    .tabItem { Label("アイコンの配置", systemImage: "arrow.left.arrow.right") }
+            }
         }
-        .frame(width: 440, height: 280)
+        .frame(width: 440, height: 360)
     }
 }
 

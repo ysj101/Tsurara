@@ -115,8 +115,12 @@ public enum MenuBarItemImagingError: Error, Equatable, LocalizedError {
     }
 }
 
-public enum MenuBarItemWindowListingError: Error, Equatable {
+public enum MenuBarItemWindowListingError: Error, Equatable, LocalizedError {
     case windowListUnavailable
+
+    public var errorDescription: String? {
+        "メニューバー項目の一覧を取得できませんでした。"
+    }
 }
 
 @MainActor
@@ -234,30 +238,62 @@ public final class MenuBarItemImager {
 
 /// macOS 26 で自プロセスの status-level window が列挙されなくても使えるよう、
 /// 区切り自体の windowID ではなく AppKit から得た CG グローバル座標を境界にする。
-enum MenuBarItemSectionGeometry {
+public enum MenuBarItemSectionGeometry {
+    public static func section(
+        of window: MenuBarItemWindow,
+        mainDividerFrame: CGRect,
+        subDividerFrame: CGRect?,
+        displayFrames: [CGRect]
+    ) -> MenuBarSectionKind? {
+        let dividerDisplay = displayContainingDivider(mainDividerFrame, among: displayFrames)
+        guard window.frame.maxY > mainDividerFrame.minY,
+              window.frame.minY < mainDividerFrame.maxY,
+              belongsToSameDisplay(window, dividerDisplay: dividerDisplay) else {
+            return nil
+        }
+        guard !window.frame.intersects(mainDividerFrame) else { return nil }
+        if window.frame.minX > mainDividerFrame.maxX {
+            return .visible
+        }
+        guard window.frame.maxX <= mainDividerFrame.minX else { return nil }
+        if let subDividerFrame {
+            if window.frame.minX >= subDividerFrame.maxX { return .hidden }
+            return .alwaysHidden
+        }
+        return .hidden
+    }
+
+    static func visibleWindows(
+        in windows: [MenuBarItemWindow],
+        mainDividerFrame: CGRect,
+        displayFrames: [CGRect]
+    ) -> [MenuBarItemWindow] {
+        return windows
+            .filter {
+                section(
+                    of: $0,
+                    mainDividerFrame: mainDividerFrame,
+                    subDividerFrame: nil,
+                    displayFrames: displayFrames
+                ) == .visible
+            }
+            .sorted(by: MenuBarItemWindow.isOrderedBefore)
+    }
+
     static func hiddenWindows(
         in windows: [MenuBarItemWindow],
         mainDividerFrame: CGRect,
         subDividerFrame: CGRect?,
         displayFrames: [CGRect]
     ) -> [MenuBarItemWindow] {
-        let dividerDisplay = displayContainingDivider(
-            mainDividerFrame,
-            among: displayFrames
-        )
-
-        // 拡大した区切りは数千 pt 幅になるため center は元の境界を表さない。
-        // 従来どおり、メイン区切りの左端とサブ区切りの右端を使う。
         return windows
-            .filter { window in
-                guard window.frame.maxY > mainDividerFrame.minY,
-                      window.frame.minY < mainDividerFrame.maxY,
-                      belongsToSameDisplay(window, dividerDisplay: dividerDisplay),
-                      window.frame.maxX <= mainDividerFrame.minX
-                else { return false }
-                return subDividerFrame.map {
-                    window.frame.minX >= $0.maxX
-                } ?? true
+            .filter {
+                section(
+                    of: $0,
+                    mainDividerFrame: mainDividerFrame,
+                    subDividerFrame: subDividerFrame,
+                    displayFrames: displayFrames
+                ) == .hidden
             }
             .sorted(by: MenuBarItemWindow.isOrderedBefore)
     }
