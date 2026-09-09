@@ -63,7 +63,7 @@ final class AccessibilityPermissionOnboardingController {
         let alert = NSAlert()
         alert.alertStyle = .informational
         alert.messageText = "アイコンの操作にはアクセシビリティの許可が必要です"
-        alert.informativeText = "Tsurara は、サブバーで選んだ実際のメニューバーアイコンへクリックを送るためにだけ、この許可を使用します。サブバーの表示は許可しなくても利用できます。"
+        alert.informativeText = "Tsurara は、サブバーからのクリック転送と、設定画面からのアイコン移動のために、この許可を使用します。サブバーの表示は許可しなくても利用できます。"
         alert.addButton(withTitle: "続ける")
         alert.addButton(withTitle: "今はしない")
 
@@ -79,7 +79,7 @@ final class AccessibilityPermissionOnboardingController {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "アクセシビリティの許可を確認できません"
-        alert.informativeText = "サブバーは引き続き表示できますが、アイコンのクリック転送は無効です。システム設定で Tsurara を許可するか、権限をもう一度リクエストしてください。"
+        alert.informativeText = "サブバーは引き続き表示できますが、クリック転送とアイコン移動は無効です。システム設定で Tsurara を許可するか、権限をもう一度リクエストしてください。"
         alert.addButton(withTitle: "システム設定を開く")
         alert.addButton(withTitle: "権限を再リクエスト")
         alert.addButton(withTitle: "キャンセル")

@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotkeyManager: HotkeyManager?
     private var settingsWindow: NSWindow?
     private var subBarCoordinator: SubBarCoordinator?
+    private var placementCoordinator: MenuBarItemPlacementCoordinator?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // バンドルの LSUIElement と同じ状態を、バンドルを介さない `swift run` でも
@@ -106,6 +107,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let panel = SubBarPanel()
         let presentationController = SubBarPresentationController(presenter: panel)
         let windowLister = CGWindowMenuBarItemWindowLister()
+        let mover = CoreGraphicsMenuBarItemMover(windowLister: windowLister)
+        let accessibilityPermissionController = AccessibilityPermissionOnboardingController()
         let positioner = AppKitMenuBarItemCapturePositioner(
             sectionManager: manager
         )
@@ -124,10 +127,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 clickSender: CoreGraphicsMenuBarItemClickSender(),
                 interfaceTracker: CGWindowMenuBarItemInterfaceTracker(),
                 activator: AXMenuBarItemActivator(),
-                mover: CoreGraphicsMenuBarItemMover(windowLister: windowLister)
+                mover: mover
             ),
-            accessibilityPermissionController:
-                AccessibilityPermissionOnboardingController()
+            accessibilityPermissionController: accessibilityPermissionController
         )
         panel.onDismissRequest = { [weak coordinator] in coordinator?.close() }
         panel.onItemClick = { [weak coordinator] item, button in
@@ -136,6 +138,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         manager.onSubBarToggleRequested = { [weak coordinator] in coordinator?.toggle() }
         manager.onSubBarCloseRequested = { [weak coordinator] in coordinator?.close() }
         subBarCoordinator = coordinator
+        placementCoordinator = MenuBarItemPlacementCoordinator(
+            manager: manager,
+            controller: MenuBarItemPlacementController(windowLister: windowLister, mover: mover),
+            permissionController: accessibilityPermissionController,
+            isSubBarBusy: { [weak coordinator] in
+                coordinator?.isForwardingClick ?? false
+            }
+        )
     }
 }
 
@@ -147,7 +157,7 @@ extension AppDelegate {
     @objc fileprivate func openSettingsWindow() {
         if settingsWindow == nil {
             let hosting = NSHostingController(
-                rootView: SettingsView(settings: settings)
+                rootView: SettingsView(settings: settings, placementCoordinator: placementCoordinator)
             )
             let window = NSWindow(contentViewController: hosting)
             window.title = "Tsurara 設定"

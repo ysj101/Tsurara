@@ -15,6 +15,10 @@ final class SubBarCoordinator {
     private var captureTask: Task<Void, Never>?
     private var forwardingTask: Task<Void, Never>?
 
+    var isForwardingClick: Bool {
+        forwardingTask != nil
+    }
+
     init(
         manager: SectionManager,
         toggleItem: AppKitStatusItem,
